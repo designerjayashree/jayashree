@@ -1079,6 +1079,12 @@ button {
   animation: scroll-left 45s linear infinite;
 }
 
+.marquee-container:hover .marquee-track,
+.marquee-track:hover,
+.marquee-card:hover {
+  animation-play-state: paused;
+}
+
 @keyframes scroll-left {
   0% {
     transform: translateX(0);

@@ -8,6 +8,7 @@ service cloud.firestore {
       return request.auth != null && (
         request.auth.token.email == 'designerjayashree9@gmail.com' ||
         request.auth.token.email == 'admin@jayashreefashion.com' ||
+        request.auth.token.email == 'admin@example.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.token.email))
       );
@@ -43,8 +44,14 @@ service cloud.firestore {
 
     // Delivery Data
     match /deliveryData/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if docId == 'config' || isAdmin() || (
+        request.auth != null && (
+          resource.data.userId == request.auth.uid ||
+          resource.data.customerEmail == request.auth.token.email
+        )
+      );
+      allow create: if request.auth != null || isAdmin();
+      allow update, delete: if isAdmin();
     }
 
     // Enquiries

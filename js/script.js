@@ -717,6 +717,27 @@ function executeOrderPayment(orderPayload) {
         console.warn('Firestore setDoc order error:', err);
       }
 
+      try {
+        await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'deliveryData', orderId), {
+          orderId: orderId,
+          userId: finalUid,
+          customerName: firestoreOrder.customerName,
+          customerEmail: finalEmail,
+          customerPhone: firestoreOrder.customerPhone,
+          state: orderPayload.state || '',
+          district: orderPayload.district || '',
+          city: orderPayload.city || '',
+          pinCode: orderPayload.pinCode || '',
+          area: orderPayload.area || '',
+          fullAddress: orderPayload.fullAddress || '',
+          address: orderPayload.formattedAddress || '',
+          estimatedDelivery: orderPayload.estimatedDelivery || '',
+          createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
+        });
+      } catch (dErr) {
+        console.warn('Firestore deliveryData setDoc error:', dErr);
+      }
+
       // Store/update authenticated user's email in Firestore for future order confirmation emails through Resend
       if (finalUid && finalUid !== 'guest' && finalEmail) {
         try {
@@ -1427,6 +1448,18 @@ document.addEventListener('click', (e) => {
 const form = document.getElementById('enquiryForm');
 const success = document.getElementById('formSuccess');
 const successHomeBtn = document.getElementById('successHomeBtn');
+
+// Homepage marquee carousel hover pause & resume
+const marqueeContainer = document.querySelector('.marquee-container');
+const marqueeTrack = document.querySelector('.marquee-track');
+if (marqueeContainer && marqueeTrack) {
+  marqueeContainer.addEventListener('mouseenter', () => {
+    marqueeTrack.style.animationPlayState = 'paused';
+  });
+  marqueeContainer.addEventListener('mouseleave', () => {
+    marqueeTrack.style.animationPlayState = 'running';
+  });
+}
 
 const nameInput = document.getElementById('f-name');
 const phoneInput = document.getElementById('f-phone');
@@ -2426,6 +2459,8 @@ ensureStateOptions();
 // Initialize customer authentication state on startup
 window.updateAuthUI = updateAuthUI;
 window.clearCustomerSession = clearCustomerSession;
+window.openCheckoutModal = openCheckoutModal;
+window.closeCheckoutModal = closeCheckoutModal;
 updateAuthUI();
 
 /* =========================================================
@@ -3254,7 +3289,7 @@ if (adminLoginForm) {
       const user = cred.user;
 
       // Authorisation check: must be in admins collection or known admin email
-      let isAuthorized = (email === 'designerjayashree9@gmail.com' || email === 'admin@jayashreefashion.com');
+      let isAuthorized = (email === 'designerjayashree9@gmail.com' || email === 'admin@jayashreefashion.com' || email === 'admin@example.com');
       if (!isAuthorized && window.fbDb) {
         try {
           const adminDocSnap = await window.fbFns.getDoc(window.fbFns.doc(window.fbDb, 'admins', user.uid));
