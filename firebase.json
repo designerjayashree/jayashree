@@ -1,7 +1,11 @@
 {
   "auth": {
     "providers": {
-      "emailPassword": true
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Jayashree Fashion",
+        "supportEmail": "designerjayashree9@gmail.com"
+      }
     }
   },
   "firestore": {

@@ -4,7 +4,8 @@ import {
   serverTimestamp, query, where, orderBy, onSnapshot, writeBatch 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { 
-  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged 
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged,
+  GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { locationService } from "./location/index.js";
 import { BRIDAL_CATEGORIES, ETHNIC_CATEGORIES, KIDS_CATEGORIES, WESTERN_CATEGORIES, WOMEN_CATEGORIES } from "./catalogData.js";
@@ -32,7 +33,8 @@ try {
 window.fbFns = {
   collection, addDoc, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc,
   serverTimestamp, query, where, orderBy, onSnapshot, writeBatch,
-  signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged,
+  GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult
 };
 window.fbFnsLoaded = true;
 
@@ -658,7 +660,7 @@ function executeOrderPayment(orderPayload) {
 
     const customer = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
     const currentUser = window.fbAuth?.currentUser;
-    const finalEmail = customer?.email || orderPayload.email || '';
+    const finalEmail = currentUser?.email || customer?.email || orderPayload.email || '';
     const finalUid = currentUser?.uid || customer?.uid || 'guest';
     const formattedPrice = formatPrice(orderPayload.purchase?.price);
 
@@ -677,7 +679,7 @@ function executeOrderPayment(orderPayload) {
       orderId: orderId,
       userId: finalUid,
       customerEmail: finalEmail,
-      customerName: customer?.name || finalEmail.split('@')[0],
+      customerName: customer?.name || (finalEmail ? finalEmail.split('@')[0] : 'Customer'),
       customerPhone: orderPayload.phone || '—',
       productId: String(orderPayload.purchase?.num || orderPayload.purchase?.cardId || ''),
       productName: orderPayload.purchase?.design || 'Designer Outfit',
@@ -714,7 +716,26 @@ function executeOrderPayment(orderPayload) {
       } catch (err) {
         console.warn('Firestore setDoc order error:', err);
       }
+
+      // Store/update authenticated user's email in Firestore for future order confirmation emails through Resend
+      if (finalUid && finalUid !== 'guest' && finalEmail) {
+        try {
+          await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'users', finalUid), {
+            uid: finalUid,
+            email: finalEmail,
+            resendEmail: finalEmail,
+            lastOrderEmail: finalEmail,
+            lastOrderId: orderId,
+            lastOrderAmount: formattedPrice,
+            updatedAt: window.fbFns.serverTimestamp()
+          }, { merge: true });
+        } catch (uErr) {
+          console.warn('Firestore user doc update for Resend order email error:', uErr);
+        }
+      }
     }
+
+    console.log(`[Order Confirmation] Resend email target set to: ${finalEmail} for order ${orderId}`);
 
     try {
       const currentAdminOrders = getAdminOrders();
@@ -1887,42 +1908,107 @@ if (authModalOverlay) {
   });
 }
 
-// Social Login / Sign Up options (Google, Facebook, Apple)
+// Social Login / Sign Up options (Google, Apple)
 authSocialBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    const provider = btn.dataset.provider || 'Social';
-    const email = `${provider.toLowerCase()}.user@example.com`;
-    const name = `${provider} User`;
+  btn.addEventListener('click', async () => {
+    const providerName = btn.dataset.provider;
+    if (!providerName) return;
 
     if (authFeedback) {
-      authFeedback.className = 'auth-feedback success';
+      authFeedback.className = 'auth-feedback';
       authFeedback.style.display = 'block';
-      authFeedback.textContent = currentAuthMode === 'signup'
-        ? `Account created with ${provider}! Welcome.`
-        : `Signed in with ${provider}! Welcome back.`;
+      authFeedback.textContent = `Connecting to ${providerName}...`;
     }
 
-    setCustomerSession({ email, name, provider });
-
-    const currentPendingPurchase = pendingPurchase || getSavedPendingPurchase();
-    const currentPendingOrder = pendingOrderCheckout || getSavedPendingOrder();
-    pendingPurchase = null;
-    pendingOrderCheckout = null;
     try {
-      sessionStorage.removeItem('pendingPurchase');
-      sessionStorage.removeItem('pendingOrderCheckout');
-    } catch (e) {}
-
-    setTimeout(() => {
-      closeAuthModal();
-      if (currentPendingPurchase) {
-        // Automatically continue to the Delivery Details screen with preserved product, size & price
-        openCheckoutModal(currentPendingPurchase);
-      } else if (currentPendingOrder) {
-        restorePendingOrderDetails(currentPendingOrder, email);
-        executeOrderPayment(currentPendingOrder);
+      if (!window.fbAuth || !window.fbFns) {
+        throw new Error('Authentication service not initialized');
       }
-    }, 700);
+
+      let authProvider;
+      if (providerName === 'Google') {
+        authProvider = new window.fbFns.GoogleAuthProvider();
+        authProvider.setCustomParameters({ prompt: 'select_account' });
+      } else if (providerName === 'Apple') {
+        authProvider = new window.fbFns.OAuthProvider('apple.com');
+        authProvider.addScope('email');
+        authProvider.addScope('name');
+      } else {
+        return;
+      }
+
+      const result = await window.fbFns.signInWithPopup(window.fbAuth, authProvider);
+      const user = result.user;
+      const email = user.email || `${providerName.toLowerCase()}user@jayashreefashion.com`;
+      const name = user.displayName || email.split('@')[0];
+
+      // Store authenticated user's email in Firestore
+      if (window.fbDb) {
+        try {
+          await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'users', user.uid), {
+            uid: user.uid,
+            email: email,
+            displayName: name,
+            provider: providerName.toLowerCase(),
+            updatedAt: window.fbFns.serverTimestamp()
+          }, { merge: true });
+        } catch (fsErr) {
+          console.warn('Firestore user doc write error:', fsErr);
+        }
+      }
+
+      if (authFeedback) {
+        authFeedback.className = 'auth-feedback success';
+        authFeedback.style.display = 'block';
+        authFeedback.textContent = currentAuthMode === 'signup'
+          ? `Account created with ${providerName}! Welcome to Jayashree.`
+          : `Signed in with ${providerName}! Welcome back.`;
+      }
+
+      setCustomerSession({
+        uid: user.uid,
+        email: email,
+        name: name,
+        provider: providerName.toLowerCase()
+      });
+
+      const currentPendingPurchase = pendingPurchase || getSavedPendingPurchase();
+      const currentPendingOrder = pendingOrderCheckout || getSavedPendingOrder();
+      pendingPurchase = null;
+      pendingOrderCheckout = null;
+      try {
+        sessionStorage.removeItem('pendingPurchase');
+        sessionStorage.removeItem('pendingOrderCheckout');
+      } catch (e) {}
+
+      setTimeout(() => {
+        closeAuthModal();
+        if (currentPendingPurchase) {
+          // Automatically continue to the Delivery Details screen with preserved product, size & price
+          openCheckoutModal(currentPendingPurchase);
+        } else if (currentPendingOrder) {
+          restorePendingOrderDetails(currentPendingOrder, email);
+          executeOrderPayment(currentPendingOrder);
+        }
+      }, 700);
+    } catch (err) {
+      console.error(`${providerName} authentication error:`, err);
+      let errorMsg = `Unable to complete ${providerName} sign-in. Please try again.`;
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        errorMsg = 'Sign in was cancelled. Please try again when ready.';
+      } else if (err.code === 'auth/unauthorized-domain') {
+        errorMsg = 'This domain is not authorized in Firebase Authentication.';
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        errorMsg = 'An account already exists with this email using another sign-in method.';
+      } else if (err.code === 'auth/operation-not-allowed') {
+        errorMsg = `${providerName} authentication is not enabled in Firebase.`;
+      }
+      if (authFeedback) {
+        authFeedback.className = 'auth-feedback error';
+        authFeedback.style.display = 'block';
+        authFeedback.textContent = errorMsg;
+      }
+    }
   });
 });
 
@@ -2077,19 +2163,85 @@ if (authSignOutBtn) {
   });
 }
 
-// Listen to Firebase Auth state
-if (window.fbAuth && window.fbFns) {
-  window.fbFns.onAuthStateChanged(window.fbAuth, (user) => {
-    if (user) {
+// Check for redirect result on page load (for mobile / popup-redirect scenarios)
+if (window.fbAuth && window.fbFns && window.fbFns.getRedirectResult) {
+  window.fbFns.getRedirectResult(window.fbAuth).then(async (result) => {
+    if (result && result.user) {
+      const user = result.user;
+      const providerId = user.providerData && user.providerData[0] ? user.providerData[0].providerId : '';
+      let detectedProvider = 'email';
+      if (providerId.includes('google')) detectedProvider = 'google';
+      else if (providerId.includes('apple')) detectedProvider = 'apple';
+
+      const email = user.email || `${detectedProvider}user@jayashreefashion.com`;
+      const name = user.displayName || (email ? email.split('@')[0] : 'Customer');
+
       setCustomerSession({
         uid: user.uid,
-        email: user.email,
-        name: user.displayName || user.email.split('@')[0],
-        provider: 'email'
+        email: email,
+        name: name,
+        provider: detectedProvider
       });
+
+      if (window.fbDb && window.fbFns) {
+        try {
+          await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'users', user.uid), {
+            uid: user.uid,
+            email: email,
+            displayName: name,
+            provider: detectedProvider,
+            resendEmail: email,
+            lastLoginAt: window.fbFns.serverTimestamp(),
+            updatedAt: window.fbFns.serverTimestamp()
+          }, { merge: true });
+        } catch (fsErr) {
+          console.warn('Firestore redirect user sync error:', fsErr);
+        }
+      }
+    }
+  }).catch((err) => {
+    console.warn('Redirect auth result warning:', err);
+  });
+}
+
+// Listen to Firebase Auth state (persists across page refresh)
+if (window.fbAuth && window.fbFns) {
+  window.fbFns.onAuthStateChanged(window.fbAuth, async (user) => {
+    if (user) {
+      const providerId = user.providerData && user.providerData[0] ? user.providerData[0].providerId : '';
+      let detectedProvider = 'email';
+      if (providerId.includes('google')) detectedProvider = 'google';
+      else if (providerId.includes('apple')) detectedProvider = 'apple';
+      else if (providerId.includes('password')) detectedProvider = 'email';
+
+      const email = user.email || `${detectedProvider}user@jayashreefashion.com`;
+      const name = user.displayName || (email ? email.split('@')[0] : 'Customer');
+
+      setCustomerSession({
+        uid: user.uid,
+        email: email,
+        name: name,
+        provider: detectedProvider
+      });
+
+      // Store authenticated user's email in Firestore for future order confirmation emails through Resend
+      if (window.fbDb && window.fbFns && email) {
+        try {
+          await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'users', user.uid), {
+            uid: user.uid,
+            email: email,
+            displayName: name,
+            provider: detectedProvider,
+            resendEmail: email,
+            updatedAt: window.fbFns.serverTimestamp()
+          }, { merge: true });
+        } catch (fsErr) {
+          console.warn('Firestore onAuthStateChanged user sync error:', fsErr);
+        }
+      }
     } else {
       const sess = getCustomerSession();
-      if (sess && sess.provider === 'email') {
+      if (sess && sess.provider !== 'guest') {
         clearCustomerSession();
       }
     }
