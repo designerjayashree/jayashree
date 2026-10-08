@@ -351,6 +351,74 @@ function areAllRequiredFieldsValid() {
   return isStateValid && isDistValid && isCityValid && isAreaValid && isPinValid && isAddrValid && isEmailValid;
 }
 
+function isAnyModalOpen() {
+  const authOverlay = document.getElementById('authModalOverlay');
+  const checkoutOverlay = document.getElementById('checkoutModalOverlay');
+  const catOverlay = document.getElementById('categoryPopupOverlay');
+  const adminOverlay = document.getElementById('adminModalOverlay');
+  const confirmOverlay = document.getElementById('confirmOverlay');
+
+  const authOpen = Boolean(authOverlay && authOverlay.classList.contains('open'));
+  const checkoutOpen = Boolean(checkoutOverlay && checkoutOverlay.classList.contains('open'));
+  const catOpen = Boolean(catOverlay && catOverlay.classList.contains('open'));
+  const adminOpen = Boolean(adminOverlay && (adminOverlay.style.display === 'flex' || adminOverlay.classList.contains('open')));
+  const confirmOpen = Boolean(confirmOverlay && confirmOverlay.classList.contains('open'));
+
+  return authOpen || checkoutOpen || catOpen || adminOpen || confirmOpen;
+}
+
+function updateModalLockState() {
+  const isOpen = isAnyModalOpen();
+  if (isOpen) {
+    const sw = window.innerWidth - document.documentElement.clientWidth;
+    if (sw > 0 && !document.body.style.paddingRight) {
+      document.body.style.paddingRight = sw + 'px';
+    }
+    document.documentElement.classList.add('modal-locked', 'popup-open');
+    document.body.classList.add('modal-locked', 'popup-open');
+  } else {
+    document.documentElement.classList.remove('modal-locked', 'popup-open');
+    document.body.classList.remove('modal-locked', 'popup-open');
+    document.body.style.paddingRight = '';
+  }
+}
+
+// Background interaction & scroll protection when any modal is open
+window.addEventListener('wheel', (e) => {
+  if (!isAnyModalOpen()) return;
+  const inModal = e.target && e.target.closest && e.target.closest(
+    '.auth-modal, .checkout-modal, .category-popup, .admin-modal-card, .confirm-modal'
+  );
+  if (!inModal) {
+    e.preventDefault();
+  }
+}, { passive: false });
+
+window.addEventListener('touchmove', (e) => {
+  if (!isAnyModalOpen()) return;
+  const inModal = e.target && e.target.closest && e.target.closest(
+    '.auth-modal, .checkout-modal, .category-popup, .admin-modal-card, .confirm-modal'
+  );
+  if (!inModal) {
+    e.preventDefault();
+  }
+}, { passive: false });
+
+// Automatic MutationObserver to keep background lock in sync with any modal state change
+if (typeof MutationObserver !== 'undefined') {
+  const modalObserver = new MutationObserver(() => {
+    updateModalLockState();
+  });
+  window.addEventListener('DOMContentLoaded', () => {
+    ['authModalOverlay', 'checkoutModalOverlay', 'categoryPopupOverlay', 'adminModalOverlay', 'confirmOverlay'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        modalObserver.observe(el, { attributes: true, attributeFilter: ['class', 'style'] });
+      }
+    });
+  });
+}
+
 function openCheckoutModal(purchase) {
   if (!purchase) return;
   currentCheckoutPurchase = purchase;
@@ -425,14 +493,13 @@ function openCheckoutModal(purchase) {
   }
 
   overlay.classList.add('open');
-  document.body.classList.add('popup-open');
+  updateModalLockState();
 }
 
 function closeCheckoutModal() {
   const overlay = document.getElementById('checkoutModalOverlay');
   if (overlay) overlay.classList.remove('open');
-  document.body.classList.remove('popup-open');
-  document.body.style.paddingRight = '';
+  updateModalLockState();
   currentCheckoutPurchase = null;
   pendingOrderCheckout = null;
   try {
@@ -1742,15 +1809,13 @@ const openPopupBtn = document.getElementById('openPopupBtn');
 const popupCats = document.querySelectorAll('.popup-cat');
 
 function openCollectionPopup(instant = false) {
-  const sw = window.innerWidth - document.documentElement.clientWidth;
-  document.body.style.paddingRight = sw + 'px';
   if (instant) {
     popupOverlay.style.transition = 'none';
     const popupCard = popupOverlay.querySelector('.category-popup');
     if (popupCard) popupCard.style.transition = 'none';
   }
   popupOverlay.classList.add('open');
-  document.body.classList.add('popup-open');
+  updateModalLockState();
   if (instant) {
     requestAnimationFrame(() => {
       popupOverlay.style.transition = '';
@@ -1767,8 +1832,7 @@ function closeCollectionPopup(instant = false) {
     if (popupCard) popupCard.style.transition = 'none';
   }
   popupOverlay.classList.remove('open');
-  document.body.classList.remove('popup-open');
-  document.body.style.paddingRight = '';
+  updateModalLockState();
   if (instant) {
     requestAnimationFrame(() => {
       popupOverlay.style.transition = '';
@@ -2507,14 +2571,22 @@ function renderCustomerOrdersList(orders) {
           <div class="my-order-amount">${escapeHtml(amount)}</div>
         </div>
 
-        ${!isCancelled ? `
-          <div class="my-order-dates-section">
-            <div class="my-order-date-item">
+        <div class="my-order-action-area">
+          ${footerHtml}
+        </div>
+
+        <div class="my-order-card-separator"></div>
+
+        <div class="my-order-bottom-section">
+          ${!isCancelled ? `
+            <div class="my-order-delivery-item">
               <span class="my-order-date-label">Estimated Delivery:</span>
               <span class="my-order-date-val my-order-delivery-val">${escapeHtml(expectedDeliveryFormatted)}</span>
             </div>
-          </div>
-        ` : ''}
+          ` : `
+            <div class="my-order-delivery-placeholder" aria-hidden="true"></div>
+          `}
+        </div>
 
         ${isCustom && customisationDetailsHtml ? customisationDetailsHtml : ''}
 
@@ -2527,10 +2599,6 @@ function renderCustomerOrdersList(orders) {
             <p class="my-order-custom-msg-text">${escapeHtml(customMsg)}</p>
           </div>
         ` : ''}
-
-        <div class="my-order-footer">
-          ${footerHtml}
-        </div>
       </div>
     `;
   }).join('');
@@ -2790,9 +2858,8 @@ function openAuthModal(mode = 'login', fromBuyNow = false) {
   }
 
   const sw = window.innerWidth - document.documentElement.clientWidth;
-  document.body.style.paddingRight = sw + 'px';
   authModalOverlay.classList.add('open');
-  document.body.classList.add('popup-open');
+  updateModalLockState();
 
   if (authEmailInput && authFormView.style.display !== 'none') {
     setTimeout(() => authEmailInput.focus(), 150);
@@ -2804,11 +2871,7 @@ function closeAuthModal() {
   authModalOverlay.classList.remove('open');
   const authModalEl = document.querySelector('.auth-modal');
   if (authModalEl) authModalEl.classList.remove('has-user-view');
-  const checkoutOverlay = document.getElementById('checkoutModalOverlay');
-  if (!checkoutOverlay || !checkoutOverlay.classList.contains('open')) {
-    document.body.classList.remove('popup-open');
-    document.body.style.paddingRight = '';
-  }
+  updateModalLockState();
   const { path } = parseHash();
   if (path === '/login' || path === '/signup' || path === '/auth') {
     window.location.hash = '#/';
@@ -5022,11 +5085,13 @@ function openAdminModal(title, html) {
   if (titleEl) titleEl.textContent = title;
   if (bodyEl) bodyEl.innerHTML = html;
   if (overlay) overlay.style.display = 'flex';
+  updateModalLockState();
 }
 
 function closeAdminModal() {
   const overlay = document.getElementById('adminModalOverlay');
   if (overlay) overlay.style.display = 'none';
+  updateModalLockState();
 }
 
 function escapeHtml(str) {
@@ -5161,6 +5226,7 @@ function showConfirm(title, message, okLabel, onOk, danger = false) {
     okBtn.classList.toggle('danger', !!danger);
   }
   if (overlay) overlay.classList.add('open');
+  updateModalLockState();
 
   confirmResolve = { onOk };
 }
@@ -5170,6 +5236,7 @@ if (confirmCancelBtn) {
   confirmCancelBtn.addEventListener('click', () => {
     const overlay = document.getElementById('confirmOverlay');
     if (overlay) overlay.classList.remove('open');
+    updateModalLockState();
     confirmResolve = null;
   });
 }
@@ -5179,6 +5246,7 @@ if (confirmOkBtn) {
   confirmOkBtn.addEventListener('click', async () => {
     const overlay = document.getElementById('confirmOverlay');
     if (overlay) overlay.classList.remove('open');
+    updateModalLockState();
     if (confirmResolve && confirmResolve.onOk) {
       try { await confirmResolve.onOk(); } catch (e) { console.error(e); }
     }
