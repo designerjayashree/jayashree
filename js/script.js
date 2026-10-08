@@ -3849,7 +3849,6 @@ function renderAdminOrders() {
                     ${isCustomerCancelled ? `
                       <span class="admin-status-static-badge">Cancelled</span>
                       <div class="admin-cancelled-details-block">
-                        <div class="admin-cancelled-line">Status: <strong>Cancelled</strong></div>
                         <div class="admin-cancelled-line">Cancelled by: <strong>Customer</strong></div>
                         ${order.cancelledAt ? `<div class="admin-cancelled-line admin-cancelled-time">Cancelled at: <span>${escapeHtml(formatOrderDateTime(order.cancelledAt))}</span></div>` : ''}
                       </div>
@@ -3861,7 +3860,6 @@ function renderAdminOrders() {
                       </select>
                       ${isCancelled ? `
                         <div class="admin-cancelled-details-block">
-                          <div class="admin-cancelled-line">Status: <strong>Cancelled</strong></div>
                           <div class="admin-cancelled-line">Cancelled by: <strong>${(order.cancelledBy || '').toLowerCase() === 'customer' ? 'Customer' : 'Admin'}</strong></div>
                           ${order.cancelledAt ? `<div class="admin-cancelled-line admin-cancelled-time">Cancelled at: <span>${escapeHtml(formatOrderDateTime(order.cancelledAt))}</span></div>` : ''}
                         </div>
@@ -3917,7 +3915,6 @@ function renderAdminCustomisation() {
       ${requests.map(req => {
         const currentStatus = req.status || 'New Request';
         const isCompleted = currentStatus === 'Completed';
-        const colourFabric = [req.colour, req.fabric].filter(Boolean).join(' · ');
         const embellishments = req.embellishments || req.embellishment || '';
         return `
           <div class="admin-cust-card" data-req-id="${escapeHtml(req.id)}">
@@ -3945,32 +3942,51 @@ function renderAdminCustomisation() {
 
               <div class="admin-cust-content-block">
                 ${req.design ? `
-                  <div class="admin-cust-design-title">${escapeHtml(req.design)}</div>
+                  <div class="admin-cust-item">
+                    <span class="admin-cust-field-label">DESIGN</span>
+                    <div class="admin-cust-field-value admin-cust-design-value">${escapeHtml(req.design)}</div>
+                  </div>
                 ` : ''}
 
-                ${colourFabric ? `
-                  <div class="admin-cust-spec-line admin-cust-spec-colour-fabric">${escapeHtml(colourFabric)}</div>
+                ${req.colour ? `
+                  <div class="admin-cust-item">
+                    <span class="admin-cust-field-label">COLOUR</span>
+                    <div class="admin-cust-field-value">${escapeHtml(req.colour)}</div>
+                  </div>
+                ` : ''}
+
+                ${req.fabric ? `
+                  <div class="admin-cust-item">
+                    <span class="admin-cust-field-label">FABRIC</span>
+                    <div class="admin-cust-field-value">${escapeHtml(req.fabric)}</div>
+                  </div>
                 ` : ''}
 
                 ${req.measurements ? `
-                  <div class="admin-cust-spec-line admin-cust-spec-measurements">${escapeHtml(req.measurements)}</div>
+                  <div class="admin-cust-item">
+                    <span class="admin-cust-field-label">MEASUREMENTS</span>
+                    <div class="admin-cust-field-value">${escapeHtml(req.measurements)}</div>
+                  </div>
                 ` : ''}
 
                 ${embellishments ? `
-                  <div class="admin-cust-spec-line admin-cust-spec-embellishments">${escapeHtml(embellishments)}</div>
+                  <div class="admin-cust-item">
+                    <span class="admin-cust-field-label">EMBELLISHMENTS</span>
+                    <div class="admin-cust-field-value">${escapeHtml(embellishments)}</div>
+                  </div>
                 ` : ''}
 
                 ${(req.additionalRequirements && req.additionalRequirements !== 'None') ? `
-                  <div class="admin-cust-info-row">
-                    <span class="admin-cust-info-label">Additional information:</span>
-                    <span class="admin-cust-info-val">${escapeHtml(req.additionalRequirements)}</span>
+                  <div class="admin-cust-item">
+                    <span class="admin-cust-field-label">ADDITIONAL INFORMATION</span>
+                    <div class="admin-cust-field-value">${escapeHtml(req.additionalRequirements)}</div>
                   </div>
                 ` : ''}
 
                 ${req.referenceImage ? `
-                  <div class="admin-cust-info-row">
-                    <span class="admin-cust-info-label">Reference image:</span>
-                    <span class="admin-cust-info-val">📎 ${escapeHtml(req.referenceImage)}</span>
+                  <div class="admin-cust-item">
+                    <span class="admin-cust-field-label">REFERENCE IMAGE</span>
+                    <div class="admin-cust-field-value">📎 ${escapeHtml(req.referenceImage)}</div>
                   </div>
                 ` : ''}
               </div>
@@ -4223,7 +4239,6 @@ function showOrderDetailsModal(orderId) {
           <div class="admin-cancelled-alert">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
             <div class="admin-cancelled-alert-body">
-              <div class="admin-cancelled-alert-row">Status: <strong>Cancelled</strong></div>
               <div class="admin-cancelled-alert-row">Cancelled by: <strong>${(order.cancelledBy || '').toLowerCase() === 'customer' ? 'Customer' : 'Admin'}</strong></div>
               ${order.cancelledAt ? `<div class="admin-cancelled-alert-row">Cancelled at: <strong>${escapeHtml(formatOrderDateTime(order.cancelledAt))}</strong></div>` : ''}
             </div>

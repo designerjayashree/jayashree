@@ -4280,53 +4280,33 @@ body.menu-open {
 .admin-cust-content-block {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 11px;
 }
 
-.admin-cust-design-title {
-  font-size: 14.5px;
-  font-weight: 600;
-  color: var(--charcoal);
-  line-height: 1.45;
-}
-
-.admin-cust-spec-line {
-  font-size: 13px;
-  line-height: 1.45;
-  color: #55483F;
-  word-break: break-word;
-}
-
-.admin-cust-spec-colour-fabric {
-  font-weight: 500;
-  color: var(--charcoal);
-}
-
-.admin-cust-spec-measurements {
-  color: #5C4D42;
-}
-
-.admin-cust-spec-embellishments {
-  color: #5C4D42;
-}
-
-.admin-cust-info-row {
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--muted);
+.admin-cust-item {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-cust-field-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.admin-cust-field-value {
+  font-size: 13.5px;
+  color: var(--charcoal);
+  line-height: 1.45;
   word-break: break-word;
 }
 
-.admin-cust-info-label {
-  font-weight: 600;
-  color: var(--espresso);
-}
-
-.admin-cust-info-val {
+.admin-cust-design-value {
+  font-size: 14px;
+  font-weight: 500;
   color: var(--charcoal);
 }
 
