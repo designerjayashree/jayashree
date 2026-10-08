@@ -1991,6 +1991,16 @@ function formatOrderDisplayDate(order) {
   return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+function formatOrderSimpleDate(order) {
+  if (!order) return '—';
+  if (typeof order.date === 'string' && /^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$/.test(order.date.trim())) {
+    return order.date.trim();
+  }
+  const d = getOrderDateObj(order);
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 function formatOrderDateTime(val) {
   if (!val) return 'Recently';
   let d = null;
@@ -2954,6 +2964,7 @@ window.ORDER_STATUS_OPTIONS = ORDER_STATUS_OPTIONS;
 window.getOrderTimestamp = getOrderTimestamp;
 window.getDisplayOrderNumber = getDisplayOrderNumber;
 window.formatOrderDisplayDate = formatOrderDisplayDate;
+window.formatOrderSimpleDate = formatOrderSimpleDate;
 window.getExpectedDeliveryForOrder = getExpectedDeliveryForOrder;
 window.isOrderCancellable = isOrderCancellable;
 window.handleCustomerCancelOrder = handleCustomerCancelOrder;
@@ -3354,9 +3365,9 @@ function renderAdminOrders() {
   const orders = getAdminOrders();
   if (orders.length === 0) {
     container.innerHTML = `
-      <div class="admin-section-header">
-        <div class="admin-section-title">Orders</div>
-        <div class="admin-section-count">0 Orders</div>
+      <div class="admin-orders-header">
+        <div class="admin-orders-header-title">Orders</div>
+        <div class="admin-orders-count-badge">0 Orders</div>
       </div>
       <p style="text-align: center; color: var(--muted); padding: 40px 0;">No customer orders found.</p>
     `;
@@ -3364,21 +3375,30 @@ function renderAdminOrders() {
   }
 
   container.innerHTML = `
-    <div class="admin-section-header">
-      <div class="admin-section-title">Orders</div>
-      <div class="admin-section-count">${orders.length} ${orders.length === 1 ? 'Order' : 'Orders'}</div>
+    <div class="admin-orders-header">
+      <div class="admin-orders-header-title">Orders</div>
+      <div class="admin-orders-count-badge">${orders.length} ${orders.length === 1 ? 'Order' : 'Orders'}</div>
     </div>
     <div class="admin-table-wrapper">
       <table class="admin-table">
+        <colgroup>
+          <col class="col-order-cust">
+          <col class="col-product-size">
+          <col class="col-qty">
+          <col class="col-amount">
+          <col class="col-date">
+          <col class="col-status">
+          <col class="col-action">
+        </colgroup>
         <thead>
           <tr>
-            <th>Order & Customer</th>
-            <th>Product & Size</th>
-            <th class="th-center">Qty</th>
-            <th>Amount</th>
-            <th>Order Date</th>
-            <th class="admin-status-col">Status</th>
-            <th style="text-align: right;">Action</th>
+            <th class="col-order-cust">ORDER &amp; CUSTOMER</th>
+            <th class="col-product-size">PRODUCT &amp; SIZE</th>
+            <th class="col-qty th-center">QTY</th>
+            <th class="col-amount">AMOUNT</th>
+            <th class="col-date">ORDER DATE</th>
+            <th class="col-status">STATUS</th>
+            <th class="col-action th-center">ACTION</th>
           </tr>
         </thead>
         <tbody>
@@ -3389,6 +3409,8 @@ function renderAdminOrders() {
             const customMsg = order.customMessage || '';
             const displayNum = getDisplayOrderNumber(order);
             const isCustom = Boolean(order.customisationRequestId || order.isCustomOrder);
+            const simpleDate = formatOrderSimpleDate(order);
+            const customerEmail = order.customerEmail || order.email || order.phone || order.contactNumber || '—';
             return `
               <tr>
                 <td class="admin-td-order-cust">
@@ -3397,11 +3419,11 @@ function renderAdminOrders() {
                     ${isCustom ? '<span class="admin-custom-tag">Custom</span>' : ''}
                   </div>
                   <div class="admin-customer-name">${escapeHtml(order.customerName || 'Customer')}</div>
-                  <div class="admin-customer-contact">${escapeHtml(order.customerEmail || order.phone || order.contactNumber || '—')}</div>
+                  <div class="admin-customer-email">${escapeHtml(customerEmail)}</div>
                 </td>
                 <td class="admin-td-product">
                   <div class="admin-product-title">${escapeHtml(order.product || order.productName || 'Designer Outfit')}</div>
-                  <div class="admin-product-meta">Size: <span class="admin-size-pill">${escapeHtml(order.size || 'Standard')}</span></div>
+                  <div class="admin-product-size">Size: <span>${escapeHtml(order.size || 'Standard')}</span></div>
                 </td>
                 <td class="admin-td-qty">
                   <span class="admin-qty-badge">${order.quantity || 1}</span>
@@ -3410,24 +3432,26 @@ function renderAdminOrders() {
                   <span class="admin-amount-text">${escapeHtml(order.amount || order.price || '₹0')}</span>
                 </td>
                 <td class="admin-td-date">
-                  <span class="admin-date-text">${escapeHtml(order.date || 'Recent')}</span>
+                  <span class="admin-date-text">${escapeHtml(simpleDate)}</span>
                 </td>
-                <td class="admin-status-control-cell">
-                  <select class="admin-order-status-select" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
-                    ${ORDER_STATUS_OPTIONS.map(opt => `
-                      <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
-                    `).join('')}
-                  </select>
-                  ${isCancelled && order.cancelledBy === 'Customer' ? `
-                    <div class="admin-cancelled-by-wrap"><span class="admin-cancelled-tag-inline">Cancelled by Customer</span></div>
-                  ` : ''}
-                  <div class="admin-custom-msg-wrap" id="adminCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block;' : 'display: none;'}">
-                    <input type="text" class="admin-custom-msg-input" id="adminCustomInput_${escapeHtml(order.id)}"
-                      placeholder="Type custom status message..."
-                      value="${escapeHtml(customMsg)}"
-                      oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
-                      onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
-                      onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
+                <td class="admin-td-status">
+                  <div class="admin-status-wrap">
+                    <select class="admin-order-status-select" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
+                      ${ORDER_STATUS_OPTIONS.map(opt => `
+                        <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
+                      `).join('')}
+                    </select>
+                    ${isCancelled && order.cancelledBy === 'Customer' ? `
+                      <div class="admin-cancelled-by-wrap"><span class="admin-cancelled-tag-inline">Cancelled by Customer</span></div>
+                    ` : ''}
+                    <div class="admin-custom-msg-wrap" id="adminCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block;' : 'display: none;'}">
+                      <input type="text" class="admin-custom-msg-input" id="adminCustomInput_${escapeHtml(order.id)}"
+                        placeholder="Custom message..."
+                        value="${escapeHtml(customMsg)}"
+                        oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+                        onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+                        onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
+                    </div>
                   </div>
                 </td>
                 <td class="admin-td-action">

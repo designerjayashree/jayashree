@@ -3483,29 +3483,65 @@ body.menu-open {
    ORDERS SECTION STYLES
    ========================================== */
 
+.admin-orders-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-orders-header-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--charcoal);
+  letter-spacing: -0.01em;
+}
+
+.admin-orders-count-badge {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--espresso);
+  background: #FAF7F2;
+  border: 1px solid var(--border);
+  padding: 3px 12px;
+  border-radius: 999px;
+}
+
 .admin-table-wrapper {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   background: #FFFFFF;
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: 0 4px 16px -6px rgba(47, 41, 36, 0.05);
+  border-radius: 14px;
+  box-shadow: 0 2px 10px -4px rgba(47, 41, 36, 0.04);
 }
 
 .admin-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 13.5px;
-  min-width: 860px;
+  font-size: 13px;
+  min-width: 780px;
 }
+
+/* Precise, visually balanced column proportions (Total = 100%) */
+.admin-table .col-order-cust   { width: 27%; }
+.admin-table .col-product-size { width: 23%; }
+.admin-table .col-qty          { width: 7%; }
+.admin-table .col-amount       { width: 11%; }
+.admin-table .col-date         { width: 12%; }
+.admin-table .col-status       { width: 12%; }
+.admin-table .col-action       { width: 8%; }
 
 .admin-table th {
   text-align: left;
-  padding: 14px 18px;
+  padding: 11px 14px;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
   background: #FAF7F2;
@@ -3519,10 +3555,12 @@ body.menu-open {
 }
 
 .admin-table td {
-  padding: 16px 18px;
+  padding: 12px 14px;
   border-bottom: 1px solid rgba(47, 41, 36, 0.06);
   color: var(--charcoal);
   vertical-align: middle;
+  background: #FFFFFF;
+  line-height: 1.35;
 }
 
 .admin-table tr:last-child td {
@@ -3533,29 +3571,30 @@ body.menu-open {
   background: #FCFAF7;
 }
 
-/* Order and Customer hierarchy in table */
+/* 1. Order & Customer Column */
 .admin-td-order-cust {
-  min-width: 180px;
+  vertical-align: middle;
 }
 
 .admin-order-badge-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 
 .admin-order-badge {
   display: inline-block;
-  font-family: monospace;
-  font-size: 12.5px;
+  font-family: inherit;
+  font-size: 11.5px;
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   color: var(--espresso);
   background: #FAF7F2;
   border: 1px solid var(--border);
-  padding: 2px 8px;
-  border-radius: 6px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
 }
 
 .admin-custom-tag {
@@ -3563,139 +3602,171 @@ body.menu-open {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   color: #6B21A8;
   background: #F3E8FF;
   border: 1px solid rgba(107, 33, 168, 0.15);
-  padding: 2px 6px;
+  padding: 1px 5px;
   border-radius: 4px;
+  white-space: nowrap;
 }
 
 .admin-customer-name {
   font-weight: 600;
   color: var(--charcoal);
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1.3;
 }
 
-.admin-customer-contact {
-  font-size: 12px;
+.admin-customer-email {
+  font-size: 11.5px;
   color: var(--muted);
-  margin-top: 2px;
+  margin-top: 1px;
+  line-height: 1.3;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
-/* Product & Size hierarchy */
+/* 2. Product & Size Column */
 .admin-td-product {
-  min-width: 190px;
+  vertical-align: middle;
 }
 
 .admin-product-title {
   font-weight: 600;
   color: var(--charcoal);
-  font-size: 13.5px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.3;
 }
 
-.admin-product-meta {
-  font-size: 12px;
+.admin-product-size {
+  font-size: 11.5px;
   color: var(--muted);
-  margin-top: 3px;
+  margin-top: 2px;
+  line-height: 1.25;
 }
 
+.admin-product-size span,
 .admin-size-pill {
   font-weight: 600;
-  color: var(--charcoal);
-  background: var(--cream);
-  padding: 1px 6px;
-  border-radius: 4px;
+  color: #4A382A;
 }
 
-/* Qty & Amount */
+/* 3. Qty Column */
 .admin-td-qty {
   text-align: center;
-  width: 60px;
+  vertical-align: middle;
 }
 
 .admin-qty-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  height: 24px;
-  background: var(--cream);
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  background: #FAF7F2;
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--charcoal);
 }
 
+/* 4. Amount Column */
 .admin-td-amount {
   white-space: nowrap;
+  vertical-align: middle;
 }
 
 .admin-amount-text {
   font-weight: 700;
   color: var(--espresso);
-  font-size: 14.5px;
+  font-size: 14px;
 }
 
+/* 5. Date Column */
 .admin-td-date {
   white-space: nowrap;
+  vertical-align: middle;
+}
+
+.admin-date-text {
   font-size: 12.5px;
   color: var(--muted);
+  font-weight: 500;
 }
 
-.admin-td-action {
-  text-align: right;
-  white-space: nowrap;
-}
-
-/* Status control cell */
+/* 6. Status Column */
+.admin-td-status,
 .admin-status-control-cell {
+  vertical-align: middle;
+}
+
+.admin-status-wrap {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  min-width: 180px;
+  gap: 3px;
 }
 
 .admin-order-status-select {
-  padding: 6px 12px;
-  font-size: 12px;
+  width: 100%;
+  max-width: 124px;
+  padding: 5px 20px 5px 8px;
+  font-size: 11.5px;
   font-family: inherit;
   font-weight: 600;
   color: var(--charcoal);
-  background: var(--white);
+  background: #FAF7F2 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236B5E55' d='M0 0l5 5 5-5z'/%3E%3C/svg%3E") no-repeat right 7px center;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   outline: none;
-  transition: all 0.2s ease;
-  width: 100%;
-  max-width: 180px;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .admin-order-status-select:focus {
   border-color: var(--espresso);
-  box-shadow: 0 0 0 2px rgba(74, 56, 42, 0.1);
+  background-color: #FFFFFF;
+  box-shadow: 0 0 0 2px rgba(74, 56, 42, 0.08);
+}
+
+.admin-cancelled-by-wrap {
+  margin-top: 2px;
+}
+
+.admin-cancelled-tag-inline {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  color: #991B1B;
+  background: #FEE2E2;
+  border: 1px solid rgba(153, 27, 27, 0.2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 .admin-custom-msg-wrap {
   width: 100%;
-  max-width: 180px;
+  max-width: 124px;
+  margin-top: 3px;
 }
 
 .admin-custom-msg-input {
   width: 100%;
-  padding: 5px 8px;
-  font-size: 11.5px;
+  padding: 4px 6px;
+  font-size: 11px;
   font-family: inherit;
   color: var(--charcoal);
   background: #FAF7F2;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 5px;
   outline: none;
   box-sizing: border-box;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .admin-custom-msg-input:focus {
@@ -3703,11 +3774,63 @@ body.menu-open {
   background: #FFFFFF;
 }
 
-.admin-cancelled-by-wrap {
-  margin-top: 2px;
+/* 7. Action Column */
+.admin-td-action {
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
-/* Status pills */
+.admin-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: #FAF7F2;
+  border: 1px solid var(--border);
+  color: #4A382A;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.admin-view-btn:hover {
+  background: #4A382A;
+  color: #FFFFFF;
+  border-color: #4A382A;
+}
+
+/* Responsive adjustments for Orders Table */
+@media (max-width: 1024px) {
+  .admin-main-card {
+    padding: 22px 18px 24px;
+  }
+  .admin-table {
+    min-width: 760px;
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-main-card {
+    padding: 16px 14px 20px;
+    border-radius: 16px;
+  }
+  .admin-orders-header {
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+  }
+  .admin-orders-header-title {
+    font-size: 18px;
+  }
+  .admin-table-wrapper {
+    border-radius: 10px;
+  }
+}
+
+/* Status pills for customisation & help */
 .admin-status-pill {
   display: inline-block;
   padding: 4px 12px;
@@ -3752,25 +3875,6 @@ body.menu-open {
 .admin-status-other {
   background: #F1F5F9;
   color: #475569;
-}
-
-.admin-view-btn {
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--charcoal);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.admin-view-btn:hover {
-  background: #4A382A;
-  color: #FFFFFF;
-  border-color: #4A382A;
 }
 
 /* ==========================================
