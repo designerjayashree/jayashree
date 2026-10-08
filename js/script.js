@@ -2132,19 +2132,16 @@ async function executeCustomerOrderCancellation(orderId, btn) {
     }
   } catch (e) {}
 
-  // 7. Visual completion pause: show "Cancelled" on button for 500ms before re-rendering list
-  setTimeout(() => {
-    // Re-render customer UI (will now display "Cancelled by you")
-    renderCustomerOrdersList(currentCustomerOrders);
+  // 7. The moment 2s hold completes: directly re-render customer UI to show "Cancelled by you"
+  renderCustomerOrdersList(currentCustomerOrders);
 
-    // Broadcast event so Admin panel updates instantly
-    window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
-      detail: { id: order.id || order.orderId, status: 'Cancelled', cancelledBy: 'customer', cancelledAt: nowIso }
-    }));
-    if (typeof renderAdminOrders === 'function') {
-      renderAdminOrders();
-    }
-  }, 500);
+  // Broadcast event so Admin panel updates instantly
+  window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
+    detail: { id: order.id || order.orderId, status: 'Cancelled', cancelledBy: 'customer', cancelledAt: nowIso }
+  }));
+  if (typeof renderAdminOrders === 'function') {
+    renderAdminOrders();
+  }
 }
 
 function handleCustomerCancelOrder(orderId, btn) {
@@ -2206,19 +2203,7 @@ function attachHoldToCancelListeners(container) {
           rafId = null;
         }
 
-        // Visual completion state
-        btn.classList.remove('is-holding');
-        btn.classList.add('is-completed');
-        btn.disabled = true;
-        if (fillEl) {
-          fillEl.style.transition = 'none';
-          fillEl.style.width = '100%';
-        }
-        if (textEl) {
-          textEl.textContent = 'Cancelled';
-        }
-
-        // Trigger cancellation execution
+        // Trigger cancellation execution immediately without intermediate states
         window.executeCustomerOrderCancellation(orderId, btn);
         return;
       }
@@ -3942,51 +3927,44 @@ function renderAdminCustomisation() {
 
               <div class="admin-cust-content-block">
                 ${req.design ? `
-                  <div class="admin-cust-item">
-                    <span class="admin-cust-field-label">DESIGN</span>
-                    <div class="admin-cust-field-value admin-cust-design-value">${escapeHtml(req.design)}</div>
+                  <div class="admin-cust-line">
+                    <span class="admin-cust-label">DESIGN:</span> <span class="admin-cust-val">${escapeHtml(req.design)}</span>
                   </div>
                 ` : ''}
 
                 ${req.colour ? `
-                  <div class="admin-cust-item">
-                    <span class="admin-cust-field-label">COLOUR</span>
-                    <div class="admin-cust-field-value">${escapeHtml(req.colour)}</div>
+                  <div class="admin-cust-line">
+                    <span class="admin-cust-label">COLOUR:</span> <span class="admin-cust-val">${escapeHtml(req.colour)}</span>
                   </div>
                 ` : ''}
 
                 ${req.fabric ? `
-                  <div class="admin-cust-item">
-                    <span class="admin-cust-field-label">FABRIC</span>
-                    <div class="admin-cust-field-value">${escapeHtml(req.fabric)}</div>
+                  <div class="admin-cust-line">
+                    <span class="admin-cust-label">FABRIC:</span> <span class="admin-cust-val">${escapeHtml(req.fabric)}</span>
                   </div>
                 ` : ''}
 
                 ${req.measurements ? `
-                  <div class="admin-cust-item">
-                    <span class="admin-cust-field-label">MEASUREMENTS</span>
-                    <div class="admin-cust-field-value">${escapeHtml(req.measurements)}</div>
+                  <div class="admin-cust-line">
+                    <span class="admin-cust-label">MEASUREMENTS:</span> <span class="admin-cust-val">${escapeHtml(req.measurements)}</span>
                   </div>
                 ` : ''}
 
                 ${embellishments ? `
-                  <div class="admin-cust-item">
-                    <span class="admin-cust-field-label">EMBELLISHMENTS</span>
-                    <div class="admin-cust-field-value">${escapeHtml(embellishments)}</div>
+                  <div class="admin-cust-line">
+                    <span class="admin-cust-label">EMBELLISHMENTS:</span> <span class="admin-cust-val">${escapeHtml(embellishments)}</span>
                   </div>
                 ` : ''}
 
                 ${(req.additionalRequirements && req.additionalRequirements !== 'None') ? `
-                  <div class="admin-cust-item">
-                    <span class="admin-cust-field-label">ADDITIONAL INFORMATION</span>
-                    <div class="admin-cust-field-value">${escapeHtml(req.additionalRequirements)}</div>
+                  <div class="admin-cust-line">
+                    <span class="admin-cust-label">ADDITIONAL INFORMATION:</span> <span class="admin-cust-val">${escapeHtml(req.additionalRequirements)}</span>
                   </div>
                 ` : ''}
 
                 ${req.referenceImage ? `
-                  <div class="admin-cust-item">
-                    <span class="admin-cust-field-label">REFERENCE IMAGE</span>
-                    <div class="admin-cust-field-value">📎 ${escapeHtml(req.referenceImage)}</div>
+                  <div class="admin-cust-line">
+                    <span class="admin-cust-label">REFERENCE IMAGE:</span> <span class="admin-cust-val">📎 ${escapeHtml(req.referenceImage)}</span>
                   </div>
                 ` : ''}
               </div>

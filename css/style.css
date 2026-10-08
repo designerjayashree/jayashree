@@ -4280,33 +4280,35 @@ body.menu-open {
 .admin-cust-content-block {
   display: flex;
   flex-direction: column;
-  gap: 11px;
 }
 
-.admin-cust-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.admin-cust-field-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.admin-cust-field-value {
-  font-size: 13.5px;
+.admin-cust-line {
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--charcoal);
-  line-height: 1.45;
+  padding: 8px 0;
+  border-bottom: 1px dotted rgba(74, 56, 42, 0.22);
   word-break: break-word;
 }
 
-.admin-cust-design-value {
-  font-size: 14px;
-  font-weight: 500;
+.admin-cust-line:first-child {
+  padding-top: 0;
+}
+
+.admin-cust-line:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.admin-cust-label {
+  font-weight: 700;
+  color: var(--espresso);
+  margin-right: 6px;
+  letter-spacing: 0.02em;
+}
+
+.admin-cust-val {
+  font-weight: 400;
   color: var(--charcoal);
 }
 
