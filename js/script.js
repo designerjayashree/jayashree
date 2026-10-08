@@ -2338,10 +2338,23 @@ function renderCustomerOrdersList(orders) {
     const isCancelled = rawStatus.toLowerCase() === 'cancelled';
     const isDelivered = rawStatus.toLowerCase() === 'delivered';
 
+    // Reliable identification of customisation orders vs normal catalogue orders
+    const isCustom = Boolean(
+      order.isCustomOrder ||
+      order.customisationRequestId ||
+      order.customisationId ||
+      order.customisationOrder ||
+      order.isCustom ||
+      (typeof order.orderType === 'string' && order.orderType.toLowerCase().includes('custom'))
+    );
+
+    // 1. Cancellation Display:
+    // If cancelled, show ONLY "Cancelled by you" or "Cancelled by Jayashree".
+    // Do NOT show a separate "Cancelled" badge. One clear cancellation status only.
     let footerHtml = '';
     if (isCancelled) {
-      const isCancelledByCustomer = (order.cancelledBy || '').toLowerCase().trim() === 'customer';
-      const label = isCancelledByCustomer ? 'Cancelled by you' : 'Cancelled by Jayashree';
+      const isCancelledByAdmin = (order.cancelledBy || '').toLowerCase().trim() === 'admin';
+      const label = isCancelledByAdmin ? 'Cancelled by Jayashree' : 'Cancelled by you';
       footerHtml = `
         <div class="my-order-cancelled-notice">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
@@ -2349,7 +2362,7 @@ function renderCustomerOrdersList(orders) {
         </div>
       `;
     } else if (isDelivered) {
-      // Delivered order cannot be cancelled (no cancel button)
+      // Delivered order cannot be cancelled
       footerHtml = '';
     } else if (cancellable) {
       // Within 24 hours: Hold to Cancel button (Reference HoldButton pattern)
@@ -2384,14 +2397,82 @@ function renderCustomerOrdersList(orders) {
       `;
     }
 
+    // 2. Header Status Badge:
+    // When cancelled, NEVER show a separate "Cancelled" badge.
+    // For customisation orders, show the active status badge (e.g. Processing, Completed, etc.).
+    // For normal catalogue orders, keep simple: show no processing pill (clean ORDER #XXXX),
+    // only show milestone pill if shipped/delivered.
+    let headerStatusBadgeHtml = '';
+    if (!isCancelled) {
+      if (isCustom) {
+        headerStatusBadgeHtml = `<span class="my-order-status-pill ${statusClass}">${escapeHtml(rawStatus)}</span>`;
+      } else if (rawStatus.toLowerCase() === 'shipped' || rawStatus.toLowerCase() === 'delivered') {
+        headerStatusBadgeHtml = `<span class="my-order-status-pill ${statusClass}">${escapeHtml(rawStatus)}</span>`;
+      }
+    }
+
+    // 3. Customisation Details (Only for customisation orders):
+    let customisationDetailsHtml = '';
+    if (isCustom) {
+      let customSpecs = order.customisationDetails || null;
+      if (!customSpecs && order.customisationRequestId) {
+        try {
+          const allCustomisations = getAdminCustomisations();
+          const foundReq = allCustomisations.find(r => r.id === order.customisationRequestId);
+          if (foundReq) {
+            customSpecs = {
+              colour: foundReq.colour,
+              fabric: foundReq.fabric,
+              design: foundReq.design,
+              measurements: foundReq.measurements,
+              embellishments: foundReq.embellishments || foundReq.embellishment
+            };
+          }
+        } catch (e) {}
+      }
+
+      if (customSpecs) {
+        const specItems = [];
+        if (customSpecs.design && customSpecs.design !== 'Not specified') {
+          specItems.push(`<div class="my-order-custom-spec-row"><span class="my-order-custom-spec-label">Design:</span> <span class="my-order-custom-spec-val">${escapeHtml(customSpecs.design)}</span></div>`);
+        }
+        if (customSpecs.fabric && customSpecs.fabric !== 'Not specified') {
+          specItems.push(`<div class="my-order-custom-spec-row"><span class="my-order-custom-spec-label">Fabric:</span> <span class="my-order-custom-spec-val">${escapeHtml(customSpecs.fabric)}</span></div>`);
+        }
+        if (customSpecs.colour && customSpecs.colour !== 'Not specified') {
+          specItems.push(`<div class="my-order-custom-spec-row"><span class="my-order-custom-spec-label">Colour:</span> <span class="my-order-custom-spec-val">${escapeHtml(customSpecs.colour)}</span></div>`);
+        }
+        if (customSpecs.measurements && customSpecs.measurements !== 'Not specified') {
+          specItems.push(`<div class="my-order-custom-spec-row"><span class="my-order-custom-spec-label">Measurements:</span> <span class="my-order-custom-spec-val">${escapeHtml(customSpecs.measurements)}</span></div>`);
+        }
+        if (customSpecs.embellishments && customSpecs.embellishments !== 'Not specified') {
+          specItems.push(`<div class="my-order-custom-spec-row"><span class="my-order-custom-spec-label">Embellishments:</span> <span class="my-order-custom-spec-val">${escapeHtml(customSpecs.embellishments)}</span></div>`);
+        }
+
+        if (specItems.length > 0) {
+          customisationDetailsHtml = `
+            <div class="my-order-custom-specs-box">
+              <div class="my-order-custom-specs-header">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                <span>Customisation Details</span>
+              </div>
+              <div class="my-order-custom-specs-list">
+                ${specItems.join('')}
+              </div>
+            </div>
+          `;
+        }
+      }
+    }
+
     return `
       <div class="my-order-card" data-order-id="${escapeHtml(orderDocId)}">
         <div class="my-order-card-header">
           <div class="my-order-id-wrap">
             <span class="my-order-id">ORDER #${escapeHtml(displayNum)}</span>
-            ${order.customisationRequestId ? '<span class="admin-custom-tag" style="margin-left: 6px;">Custom Outfit</span>' : ''}
+            ${isCustom ? '<span class="admin-custom-tag" style="margin-left: 6px;">Custom Outfit</span>' : ''}
           </div>
-          <span class="my-order-status-pill ${statusClass}">${escapeHtml(rawStatus)}</span>
+          ${headerStatusBadgeHtml}
         </div>
         <div class="my-order-body">
           <div class="my-order-info">
@@ -2410,13 +2491,17 @@ function renderCustomerOrdersList(orders) {
             <span class="my-order-date-label">Order Date:</span>
             <span class="my-order-date-val">${escapeHtml(orderDateFormatted)}</span>
           </div>
-          <div class="my-order-date-item">
-            <span class="my-order-date-label">Expected Delivery:</span>
-            <span class="my-order-date-val my-order-delivery-val">${escapeHtml(expectedDeliveryFormatted)}</span>
-          </div>
+          ${isCustom ? `
+            <div class="my-order-date-item">
+              <span class="my-order-date-label">Expected Delivery:</span>
+              <span class="my-order-date-val my-order-delivery-val">${escapeHtml(expectedDeliveryFormatted)}</span>
+            </div>
+          ` : ''}
         </div>
 
-        ${(rawStatus === 'Other' && customMsg) || customMsg ? `
+        ${isCustom && customisationDetailsHtml ? customisationDetailsHtml : ''}
+
+        ${isCustom && customMsg ? `
           <div class="my-order-custom-msg-box">
             <div class="my-order-custom-msg-header">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -2525,6 +2610,7 @@ function setupCustomerOrdersListener(userOrCustomer) {
           paymentMethod: data.paymentMethod || 'Prepaid / Online',
           address: data.deliveryAddress || data.address || data.fullAddress || '',
           deliveryAddress: data.deliveryAddress || data.address || data.fullAddress || '',
+          customisationDetails: data.customisationDetails || null,
           customisationRequestId: data.customisationRequestId || null,
           isCustomOrder: Boolean(data.isCustomOrder || data.customisationRequestId)
         });
@@ -4721,6 +4807,7 @@ function setupAdminOrdersListener() {
             pinCode: data.pinCode || '',
             cancelledBy: data.cancelledBy || '',
             cancelledAt: data.cancelledAt || null,
+            customisationDetails: data.customisationDetails || null,
             customisationRequestId: data.customisationRequestId || null,
             isCustomOrder: Boolean(data.isCustomOrder || data.customisationRequestId)
           });
@@ -4836,6 +4923,7 @@ async function loadAdminDataFromFirestore() {
           pinCode: data.pinCode || '',
           cancelledBy: data.cancelledBy || '',
           cancelledAt: data.cancelledAt || null,
+          customisationDetails: data.customisationDetails || null,
           customisationRequestId: data.customisationRequestId || null,
           isCustomOrder: Boolean(data.isCustomOrder || data.customisationRequestId)
         });
