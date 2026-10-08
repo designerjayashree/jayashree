@@ -3750,6 +3750,13 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   border-bottom: 1px solid rgba(47, 41, 36, 0.06);
 }
 
+#adminSectionCustomisation .admin-section-header,
+#adminCustomisationContent .admin-section-header {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 20px;
+}
+
 .admin-section-title {
   font-size: 21px;
   font-weight: 500;
@@ -4306,8 +4313,8 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(47, 41, 36, 0.08);
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .admin-cust-tag {
