@@ -582,6 +582,7 @@ button {
   width: 72px;
   height: 96px;
   object-fit: cover;
+  object-position: center top;
   border-radius: 6px;
   box-shadow: 0 10px 30px rgba(47, 41, 36, 0.08);
   flex-shrink: 0;
@@ -599,11 +600,13 @@ button {
 .strip-img:nth-child(2) {
   --final-rotate: 2deg;
   animation-delay: 0.2s;
+  object-position: center 30%;
 }
 
 .strip-img:nth-child(3) {
   --final-rotate: -1.5deg;
   animation-delay: 0.3s;
+  object-position: center 55%;
 }
 
 .strip-img:nth-child(4) {
@@ -1042,6 +1045,7 @@ button {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center top;
   display: block;
   transition: transform .4s ease;
 }
@@ -1260,6 +1264,7 @@ footer {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center top;
   display: block;
 }
 

@@ -1,16 +1,22 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getFirestore, collection, addDoc, serverTimestamp, query, where, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { 
+  getFirestore, collection, addDoc, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, 
+  serverTimestamp, query, where, orderBy, onSnapshot, writeBatch 
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { 
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged 
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { locationService } from "./location/index.js";
 import { BRIDAL_CATEGORIES, ETHNIC_CATEGORIES, KIDS_CATEGORIES, WESTERN_CATEGORIES, WOMEN_CATEGORIES } from "./catalogData.js";
 
 const firebaseConfig = {
-  apiKey: "YOUR_FIREBASE_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyClbTtfoGIsidVBpXmnnoga7i8ITSAGJ9I",
+  authDomain: "jayashree-fashion-106ad.firebaseapp.com",
+  projectId: "jayashree-fashion-106ad",
+  storageBucket: "jayashree-fashion-106ad.firebasestorage.app",
+  messagingSenderId: "354729251033",
+  appId: "1:354729251033:web:4493a8d0dd1cec1e28eec8",
+  measurementId: "G-GKX9H6HZ25"
 };
 
 let app = null;
@@ -24,9 +30,9 @@ try {
   window.fbAuth = null;
 }
 window.fbFns = {
-  collection, addDoc, serverTimestamp, query, where, orderBy, onSnapshot,
-  doc, updateDoc, deleteDoc, writeBatch, getDocs,
-  signInWithEmailAndPassword, signOut, onAuthStateChanged
+  collection, addDoc, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc,
+  serverTimestamp, query, where, orderBy, onSnapshot, writeBatch,
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged
 };
 window.fbFnsLoaded = true;
 
@@ -636,12 +642,13 @@ function executeOrderPayment(orderPayload) {
     submitBtn.innerHTML = '<span>Processing payment...</span>';
   }
 
-  processPaymentSimulation(orderPayload, (paymentResponse) => {
+  processPaymentSimulation(orderPayload, async (paymentResponse) => {
     // Show Payment Success View
     if (deliveryView) deliveryView.style.display = 'none';
     if (successView) successView.style.display = 'block';
 
     const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+    const orderId = `JF-${randomSuffix}`;
     const orderIdEl = document.getElementById('confirmOrderId');
     const productEl = document.getElementById('confirmProduct');
     const sizeEl = document.getElementById('confirmSize');
@@ -650,18 +657,83 @@ function executeOrderPayment(orderPayload) {
     const emailEl = document.getElementById('confirmEmailDisplay');
 
     const customer = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
+    const currentUser = window.fbAuth?.currentUser;
     const finalEmail = customer?.email || orderPayload.email || '';
+    const finalUid = currentUser?.uid || customer?.uid || 'guest';
+    const formattedPrice = formatPrice(orderPayload.purchase?.price);
 
-    if (orderIdEl) orderIdEl.textContent = `#JF-${randomSuffix}`;
+    if (orderIdEl) orderIdEl.textContent = `#${orderId}`;
     if (productEl) productEl.textContent = orderPayload.purchase?.design || 'Designer Outfit';
     if (sizeEl) sizeEl.textContent = orderPayload.purchase?.size || 'Standard';
-    if (amountEl) amountEl.textContent = formatPrice(orderPayload.purchase?.price);
+    if (amountEl) amountEl.textContent = formattedPrice;
     if (addrEl) addrEl.textContent = orderPayload.formattedAddress;
     if (emailEl) emailEl.textContent = finalEmail;
     const confirmEstimateEl = document.getElementById('confirmEstimate');
     if (confirmEstimateEl && orderPayload.estimatedDelivery) {
       confirmEstimateEl.textContent = orderPayload.estimatedDelivery;
     }
+
+    const firestoreOrder = {
+      orderId: orderId,
+      userId: finalUid,
+      customerEmail: finalEmail,
+      customerName: customer?.name || finalEmail.split('@')[0],
+      customerPhone: orderPayload.phone || '—',
+      productId: String(orderPayload.purchase?.num || orderPayload.purchase?.cardId || ''),
+      productName: orderPayload.purchase?.design || 'Designer Outfit',
+      product: orderPayload.purchase?.design || 'Designer Outfit',
+      category: orderPayload.purchase?.category || '',
+      subcategory: orderPayload.purchase?.subcategory || '',
+      size: orderPayload.purchase?.size || 'Standard',
+      price: formattedPrice,
+      amount: formattedPrice,
+      quantity: 1,
+      state: orderPayload.state || '',
+      district: orderPayload.district || '',
+      city: orderPayload.city || '',
+      pinCode: orderPayload.pinCode || '',
+      area: orderPayload.area || '',
+      fullAddress: orderPayload.fullAddress || '',
+      address: orderPayload.formattedAddress || '',
+      estimatedDelivery: orderPayload.estimatedDelivery || '',
+      paymentStatus: 'Paid',
+      orderStatus: 'Processing',
+      status: 'Processing',
+      paymentMethod: 'Prepaid / Online',
+      razorpayOrderId: 'sim_ord_' + randomSuffix,
+      razorpayPaymentId: paymentResponse?.paymentId || ('pay_sim_' + randomSuffix),
+      razorpaySignature: 'sim_sig_' + randomSuffix,
+      date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+      createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString(),
+      updatedAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
+    };
+
+    if (window.fbDb && window.fbFns) {
+      try {
+        await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'orders', orderId), firestoreOrder);
+      } catch (err) {
+        console.warn('Firestore setDoc order error:', err);
+      }
+    }
+
+    try {
+      const currentAdminOrders = getAdminOrders();
+      currentAdminOrders.unshift({
+        id: orderId,
+        date: firestoreOrder.date,
+        customerName: firestoreOrder.customerName,
+        customerEmail: finalEmail,
+        customerPhone: '—',
+        product: firestoreOrder.productName,
+        size: firestoreOrder.size,
+        quantity: 1,
+        amount: formattedPrice,
+        status: 'Processing',
+        paymentMethod: 'Online',
+        address: orderPayload.formattedAddress
+      });
+      saveAdminOrders(currentAdminOrders);
+    } catch (e) {}
 
     if (submitBtn) {
       submitBtn.disabled = false;
@@ -1396,6 +1468,10 @@ if (form) {
 
     try {
       if (window.fbDb && window.fbFns) {
+        await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'customisationRequests'), {
+          ...payload,
+          createdAt: window.fbFns.serverTimestamp()
+        });
         await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'enquiries'), {
           ...payload,
           createdAt: window.fbFns.serverTimestamp()
@@ -1465,7 +1541,7 @@ const helpSuccess = document.getElementById('helpSuccess');
 const helpHomeBtn = document.getElementById('helpHomeBtn');
 
 if (helpForm && helpText) {
-  helpForm.addEventListener('submit', (e) => {
+  helpForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const val = helpText.value.trim();
     if (!val) {
@@ -1483,6 +1559,23 @@ if (helpForm && helpText) {
       helpSuccess.style.display = 'block';
     }
     saveLocalHelp(val);
+
+    const customer = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
+    const helpPayload = {
+      customerName: customer ? customer.name || 'Customer' : 'Website Customer',
+      email: customer ? customer.email || '—' : '—',
+      message: val,
+      submissionDate: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ', ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status: 'Open',
+      createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
+    };
+    if (window.fbDb && window.fbFns) {
+      try {
+        await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'helpRequests'), helpPayload);
+      } catch (err) {
+        console.warn('Firestore help request write error:', err);
+      }
+    }
   });
 
   helpText.addEventListener('input', () => {
@@ -1659,7 +1752,13 @@ function setAuthMode(mode) {
     authFeedback.className = 'auth-feedback';
   }
 
+  const pwdInput = document.getElementById('authPasswordInput');
+
   if (mode === 'signup') {
+    if (pwdInput) {
+      pwdInput.setAttribute('autocomplete', 'new-password');
+      pwdInput.setAttribute('placeholder', 'Min. 6 characters');
+    }
     if (authTabLogin) {
       authTabLogin.classList.remove('active');
       authTabLogin.setAttribute('aria-selected', 'false');
@@ -1673,6 +1772,10 @@ function setAuthMode(mode) {
     if (authSwitchPrompt) authSwitchPrompt.textContent = 'Already have an account?';
     if (authSwitchAction) authSwitchAction.textContent = 'Login';
   } else {
+    if (pwdInput) {
+      pwdInput.setAttribute('autocomplete', 'current-password');
+      pwdInput.setAttribute('placeholder', '••••••••');
+    }
     if (authTabLogin) {
       authTabLogin.classList.add('active');
       authTabLogin.setAttribute('aria-selected', 'true');
@@ -1825,28 +1928,83 @@ authSocialBtns.forEach(btn => {
 
 // Email Form Submission (Login / Sign Up)
 if (authEmailForm) {
-  authEmailForm.addEventListener('submit', (e) => {
+  authEmailForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = authEmailInput ? authEmailInput.value.trim() : '';
-    if (!email) return;
+    const pwdInput = document.getElementById('authPasswordInput');
+    const password = pwdInput ? pwdInput.value : '';
+
+    if (!email) {
+      if (authFeedback) {
+        authFeedback.className = 'auth-feedback error';
+        authFeedback.style.display = 'block';
+        authFeedback.textContent = 'Please enter your email address.';
+      }
+      return;
+    }
+    if (!password) {
+      if (authFeedback) {
+        authFeedback.className = 'auth-feedback error';
+        authFeedback.style.display = 'block';
+        authFeedback.textContent = 'Please enter your password.';
+      }
+      return;
+    }
+    if (currentAuthMode === 'signup' && password.length < 6) {
+      if (authFeedback) {
+        authFeedback.className = 'auth-feedback error';
+        authFeedback.style.display = 'block';
+        authFeedback.textContent = 'Password must be at least 6 characters.';
+      }
+      return;
+    }
 
     if (authSubmitBtn) {
       authSubmitBtn.disabled = true;
       authSubmitBtn.textContent = 'Processing...';
     }
 
-    setTimeout(() => {
-      if (authFeedback) {
-        authFeedback.className = 'auth-feedback success';
-        authFeedback.style.display = 'block';
-        authFeedback.textContent = currentAuthMode === 'signup'
-          ? 'Account created successfully! Welcome to Jayashree.'
-          : 'Welcome back! Logged in successfully.';
+    try {
+      let user = null;
+      if (currentAuthMode === 'signup') {
+        if (window.fbAuth && window.fbFns) {
+          const cred = await window.fbFns.createUserWithEmailAndPassword(window.fbAuth, email, password);
+          user = cred.user;
+          if (window.fbDb) {
+            try {
+              await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'users', user.uid), {
+                uid: user.uid,
+                email: user.email,
+                displayName: email.split('@')[0],
+                createdAt: window.fbFns.serverTimestamp(),
+                updatedAt: window.fbFns.serverTimestamp()
+              });
+            } catch (fsErr) {
+              console.warn('Firestore user doc write error:', fsErr);
+            }
+          }
+        }
+        if (authFeedback) {
+          authFeedback.className = 'auth-feedback success';
+          authFeedback.style.display = 'block';
+          authFeedback.textContent = 'Account created successfully! Welcome to Jayashree.';
+        }
+      } else {
+        if (window.fbAuth && window.fbFns) {
+          const cred = await window.fbFns.signInWithEmailAndPassword(window.fbAuth, email, password);
+          user = cred.user;
+        }
+        if (authFeedback) {
+          authFeedback.className = 'auth-feedback success';
+          authFeedback.style.display = 'block';
+          authFeedback.textContent = 'Welcome back! Logged in successfully.';
+        }
       }
 
       setCustomerSession({
-        email,
-        name: email.split('@')[0],
+        uid: user?.uid || '',
+        email: email,
+        name: user?.displayName || email.split('@')[0],
         provider: 'email'
       });
 
@@ -1874,13 +2032,39 @@ if (authEmailForm) {
           executeOrderPayment(currentPendingOrder);
         }
       }, 700);
-    }, 450);
+    } catch (err) {
+      console.error('Authentication error:', err);
+      let errorMsg = 'Authentication failed. Please check your details and try again.';
+      if (err.code === 'auth/email-already-in-use') {
+        errorMsg = 'This email is already registered. Please login instead.';
+      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        errorMsg = 'Incorrect email or password. Please try again.';
+      } else if (err.code === 'auth/user-not-found') {
+        errorMsg = 'No account found with this email. Please sign up.';
+      } else if (err.code === 'auth/weak-password') {
+        errorMsg = 'Password must be at least 6 characters.';
+      } else if (err.code === 'auth/invalid-email') {
+        errorMsg = 'Please enter a valid email address.';
+      }
+      if (authFeedback) {
+        authFeedback.className = 'auth-feedback error';
+        authFeedback.style.display = 'block';
+        authFeedback.textContent = errorMsg;
+      }
+      if (authSubmitBtn) {
+        authSubmitBtn.disabled = false;
+        authSubmitBtn.textContent = currentAuthMode === 'signup' ? 'Sign Up' : 'Login';
+      }
+    }
   });
 }
 
 // Sign Out button inside profile view
 if (authSignOutBtn) {
-  authSignOutBtn.addEventListener('click', () => {
+  authSignOutBtn.addEventListener('click', async () => {
+    if (window.fbAuth && window.fbFns) {
+      try { await window.fbFns.signOut(window.fbAuth); } catch (e) {}
+    }
     clearCustomerSession();
     if (authUserView) authUserView.style.display = 'none';
     if (authFormView) authFormView.style.display = 'block';
@@ -1889,6 +2073,25 @@ if (authSignOutBtn) {
       authFeedback.className = 'auth-feedback success';
       authFeedback.style.display = 'block';
       authFeedback.textContent = 'Signed out successfully.';
+    }
+  });
+}
+
+// Listen to Firebase Auth state
+if (window.fbAuth && window.fbFns) {
+  window.fbFns.onAuthStateChanged(window.fbAuth, (user) => {
+    if (user) {
+      setCustomerSession({
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || user.email.split('@')[0],
+        provider: 'email'
+      });
+    } else {
+      const sess = getCustomerSession();
+      if (sess && sess.provider === 'email') {
+        clearCustomerSession();
+      }
     }
   });
 }
@@ -2217,6 +2420,7 @@ function showAdminDashboard() {
   if (loginView) loginView.style.display = 'none';
   if (dashView) dashView.style.display = '';
   switchAdminTab(currentAdminTab);
+  loadAdminDataFromFirestore();
 }
 
 function switchAdminTab(tabName) {
@@ -2571,17 +2775,29 @@ function showHelpDetailsModal(helpId) {
   openAdminModal(`Help Request • ${escapeHtml(q.customerName || 'Customer')}`, content);
 }
 
-window.updateOrderStatus = function(id, newStatus) {
+window.updateOrderStatus = async function(id, newStatus) {
   const orders = getAdminOrders();
   const order = orders.find(o => o.id === id);
   if (order) {
     order.status = newStatus;
+    order.orderStatus = newStatus;
     saveAdminOrders(orders);
     renderAdminOrders();
   }
+  if (window.fbDb && window.fbFns) {
+    try {
+      await window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'orders', id), {
+        status: newStatus,
+        orderStatus: newStatus,
+        updatedAt: window.fbFns.serverTimestamp()
+      });
+    } catch (err) {
+      console.warn('Firestore updateOrderStatus error:', err);
+    }
+  }
 };
 
-window.updateCustomisationStatus = function(id, newStatus) {
+window.updateCustomisationStatus = async function(id, newStatus) {
   const items = getAdminCustomisations();
   const item = items.find(i => i.id === id);
   if (item) {
@@ -2589,9 +2805,19 @@ window.updateCustomisationStatus = function(id, newStatus) {
     saveAdminCustomisations(items);
     renderAdminCustomisation();
   }
+  if (window.fbDb && window.fbFns) {
+    try {
+      await window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'customisationRequests', id), {
+        status: newStatus,
+        updatedAt: window.fbFns.serverTimestamp()
+      });
+    } catch (err) {
+      console.warn('Firestore updateCustomisationStatus error:', err);
+    }
+  }
 };
 
-window.updateHelpStatus = function(id, newStatus) {
+window.updateHelpStatus = async function(id, newStatus) {
   const items = getAdminHelp();
   const item = items.find(i => i.id === id);
   if (item) {
@@ -2599,7 +2825,98 @@ window.updateHelpStatus = function(id, newStatus) {
     saveAdminHelp(items);
     renderAdminHelp();
   }
+  if (window.fbDb && window.fbFns) {
+    try {
+      await window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'helpRequests', id), {
+        status: newStatus,
+        updatedAt: window.fbFns.serverTimestamp()
+      });
+    } catch (err) {
+      console.warn('Firestore updateHelpStatus error:', err);
+    }
+  }
 };
+
+async function loadAdminDataFromFirestore() {
+  if (!window.fbDb || !window.fbFns) return;
+  try {
+    const ordersSnap = await window.fbFns.getDocs(window.fbFns.collection(window.fbDb, 'orders'));
+    if (!ordersSnap.empty) {
+      const fbOrders = [];
+      ordersSnap.forEach(d => {
+        const data = d.data();
+        fbOrders.push({
+          id: data.orderId || d.id,
+          date: data.date || 'Recent',
+          customerName: data.customerName || (data.customerEmail ? data.customerEmail.split('@')[0] : 'Customer'),
+          customerEmail: data.customerEmail || '',
+          customerPhone: data.customerPhone || '—',
+          product: data.productName || data.product || 'Designer Outfit',
+          size: data.size || 'Standard',
+          quantity: data.quantity || 1,
+          amount: data.amount || data.price || '₹0',
+          status: data.orderStatus || data.status || 'Processing',
+          paymentMethod: data.paymentMethod || 'Online',
+          address: data.address || data.fullAddress || '—'
+        });
+      });
+      saveAdminOrders(fbOrders);
+      if (currentAdminTab === 'orders') renderAdminOrders();
+    }
+  } catch (e) {
+    console.warn('Admin load orders error:', e);
+  }
+
+  try {
+    const custSnap = await window.fbFns.getDocs(window.fbFns.collection(window.fbDb, 'customisationRequests'));
+    if (!custSnap.empty) {
+      const fbCust = [];
+      custSnap.forEach(d => {
+        const data = d.data();
+        fbCust.push({
+          id: d.id,
+          fullName: data.fullName || 'Valued Customer',
+          contactNumber: data.contactNumber || '—',
+          colour: data.colour || 'Not specified',
+          fabric: data.fabric || 'Not specified',
+          design: data.design || 'Not specified',
+          measurements: data.measurements || 'Not specified',
+          embellishments: data.embellishments || 'Not specified',
+          additionalRequirements: data.additionalRequirements || 'None',
+          referenceImage: data.referenceImage || '',
+          submissionDate: data.submissionDate || 'Recent',
+          status: data.status || 'New Request'
+        });
+      });
+      saveAdminCustomisations(fbCust);
+      if (currentAdminTab === 'customisation') renderAdminCustomisation();
+    }
+  } catch (e) {
+    console.warn('Admin load customisations error:', e);
+  }
+
+  try {
+    const helpSnap = await window.fbFns.getDocs(window.fbFns.collection(window.fbDb, 'helpRequests'));
+    if (!helpSnap.empty) {
+      const fbHelp = [];
+      helpSnap.forEach(d => {
+        const data = d.data();
+        fbHelp.push({
+          id: d.id,
+          customerName: data.customerName || 'Customer',
+          email: data.email || '—',
+          message: data.message || '',
+          submissionDate: data.submissionDate || 'Recent',
+          status: data.status || 'Open'
+        });
+      });
+      saveAdminHelp(fbHelp);
+      if (currentAdminTab === 'help') renderAdminHelp();
+    }
+  } catch (e) {
+    console.warn('Admin load help error:', e);
+  }
+}
 
 function openAdminModal(title, html) {
   const overlay = document.getElementById('adminModalOverlay');
@@ -2649,8 +2966,8 @@ if (adminLoginForm) {
   adminLoginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(adminLoginForm);
-    const email = fd.get('email');
-    const password = fd.get('password');
+    const email = (fd.get('email') || '').trim();
+    const password = fd.get('password') || '';
     const errEl = document.getElementById('adminError');
     if (errEl) errEl.classList.remove('show');
 
@@ -2662,16 +2979,50 @@ if (adminLoginForm) {
       return;
     }
 
-    if (window.fbAuth && window.fbFns) {
-      try {
-        await window.fbFns.signInWithEmailAndPassword(window.fbAuth, email, password);
-      } catch (err) {
-        console.warn('Firebase login bypassed for local admin preview:', err);
+    try {
+      if (!window.fbAuth || !window.fbFns) {
+        throw new Error('Authentication service not initialized');
+      }
+
+      const cred = await window.fbFns.signInWithEmailAndPassword(window.fbAuth, email, password);
+      const user = cred.user;
+
+      // Authorisation check: must be in admins collection or known admin email
+      let isAuthorized = (email === 'designerjayashree9@gmail.com' || email === 'admin@jayashreefashion.com');
+      if (!isAuthorized && window.fbDb) {
+        try {
+          const adminDocSnap = await window.fbFns.getDoc(window.fbFns.doc(window.fbDb, 'admins', user.uid));
+          if (adminDocSnap.exists()) isAuthorized = true;
+        } catch (authErr) {
+          console.warn('Admin check lookup failed:', authErr);
+        }
+      }
+
+      if (!isAuthorized) {
+        await window.fbFns.signOut(window.fbAuth);
+        if (errEl) {
+          errEl.textContent = 'Access denied: You do not have administrator permissions.';
+          errEl.classList.add('show');
+        }
+        return;
+      }
+
+      sessionStorage.setItem('jayashree_admin_logged', 'true');
+      showAdminDashboard();
+      await loadAdminDataFromFirestore();
+    } catch (err) {
+      console.error('Admin login error:', err);
+      if (errEl) {
+        let msg = 'Invalid admin credentials.';
+        if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+          msg = 'Incorrect admin email or password.';
+        } else if (err.code === 'auth/user-not-found') {
+          msg = 'No admin account found with this email.';
+        }
+        errEl.textContent = msg;
+        errEl.classList.add('show');
       }
     }
-
-    sessionStorage.setItem('jayashree_admin_logged', 'true');
-    showAdminDashboard();
   });
 }
 
