@@ -651,6 +651,7 @@ function executeOrderPayment(orderPayload) {
 
     const randomSuffix = Math.floor(100000 + Math.random() * 900000);
     const orderId = `JF-${randomSuffix}`;
+    const fourDigitOrderNumber = String(Math.floor(1000 + Math.random() * 9000));
     const orderIdEl = document.getElementById('confirmOrderId');
     const productEl = document.getElementById('confirmProduct');
     const sizeEl = document.getElementById('confirmSize');
@@ -664,7 +665,7 @@ function executeOrderPayment(orderPayload) {
     const finalUid = currentUser?.uid || customer?.uid || 'guest';
     const formattedPrice = formatPrice(orderPayload.purchase?.price);
 
-    if (orderIdEl) orderIdEl.textContent = `#${orderId}`;
+    if (orderIdEl) orderIdEl.textContent = `#${fourDigitOrderNumber}`;
     if (productEl) productEl.textContent = orderPayload.purchase?.design || 'Designer Outfit';
     if (sizeEl) sizeEl.textContent = orderPayload.purchase?.size || 'Standard';
     if (amountEl) amountEl.textContent = formattedPrice;
@@ -677,6 +678,7 @@ function executeOrderPayment(orderPayload) {
 
     const firestoreOrder = {
       orderId: orderId,
+      orderNumber: fourDigitOrderNumber,
       userId: finalUid,
       customerEmail: finalEmail,
       customerName: customer?.name || (finalEmail ? finalEmail.split('@')[0] : 'Customer'),
@@ -764,6 +766,7 @@ function executeOrderPayment(orderPayload) {
       currentAdminOrders.unshift({
         id: orderId,
         orderId: orderId,
+        orderNumber: fourDigitOrderNumber,
         userId: finalUid,
         date: firestoreOrder.date,
         createdAt: new Date().toISOString(),
@@ -779,7 +782,12 @@ function executeOrderPayment(orderPayload) {
         orderStatus: 'Processing',
         customMessage: '',
         paymentMethod: 'Online',
-        address: orderPayload.formattedAddress
+        address: orderPayload.formattedAddress,
+        estimatedDelivery: orderPayload.estimatedDelivery || '',
+        state: orderPayload.state || '',
+        pinCode: orderPayload.pinCode || '',
+        cancelledBy: '',
+        cancelledAt: null
       });
       saveAdminOrders(currentAdminOrders);
     } catch (e) {}
@@ -1912,26 +1920,183 @@ function getOrderTimestamp(order) {
   return 0;
 }
 
-function formatOrderDisplayDate(order) {
-  if (!order) return 'Recent';
-  const c = order.createdAt;
-  let dateObj = null;
-  if (c) {
-    if (typeof c.toDate === 'function') dateObj = c.toDate();
-    else if (typeof c === 'object' && typeof c.seconds === 'number') dateObj = new Date(c.seconds * 1000);
-    else if (typeof c === 'number') dateObj = new Date(c);
-    else if (typeof c === 'string') {
-      const parsed = Date.parse(c);
-      if (!isNaN(parsed)) dateObj = new Date(parsed);
-    }
+function getDisplayOrderNumber(order) {
+  if (!order) return '1001';
+  if (order.orderNumber) {
+    const clean = String(order.orderNumber).trim();
+    if (/^\d{4}$/.test(clean)) return clean;
+    const digits = clean.replace(/\D/g, '');
+    if (digits.length >= 4) return digits.slice(-4);
+    if (digits.length > 0) return digits.padStart(4, '0');
   }
-  if (dateObj && !isNaN(dateObj.getTime())) {
-    return dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const idStr = String(order.orderId || order.id || '').trim();
+  if (!idStr) return '1001';
+
+  const trailingDigitsMatch = idStr.match(/(\d{4,})$/);
+  if (trailingDigitsMatch) {
+    return trailingDigitsMatch[1].slice(-4);
   }
-  return order.date || 'Recent';
+  const allDigits = idStr.replace(/\D/g, '');
+  if (allDigits.length >= 4) {
+    return allDigits.slice(-4);
+  }
+
+  // Deterministic 4-digit number (1000 - 9999) for arbitrary Firestore IDs
+  let hash = 0;
+  for (let i = 0; i < idStr.length; i++) {
+    hash = ((hash << 5) - hash + idStr.charCodeAt(i)) | 0;
+  }
+  const num = 1000 + (Math.abs(hash) % 9000);
+  return String(num);
 }
 
+function getOrderDateObj(order) {
+  if (!order) return new Date();
+  const c = order.createdAt;
+  if (c) {
+    if (typeof c.toDate === 'function') return c.toDate();
+    if (typeof c === 'object' && typeof c.seconds === 'number') return new Date(c.seconds * 1000);
+    if (typeof c === 'number') return new Date(c);
+    if (typeof c === 'string') {
+      const parsed = Date.parse(c);
+      if (!isNaN(parsed)) return new Date(parsed);
+    }
+  }
+  if (order.date && typeof order.date === 'string') {
+    const parsed = Date.parse(order.date);
+    if (!isNaN(parsed)) return new Date(parsed);
+  }
+  return new Date();
+}
+
+function formatOrderDisplayDate(order) {
+  const d = getOrderDateObj(order);
+  const MONTHS = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function formatOrderDateTime(val) {
+  if (!val) return 'Recently';
+  let d = null;
+  if (typeof val?.toDate === 'function') d = val.toDate();
+  else if (typeof val === 'object' && typeof val?.seconds === 'number') d = new Date(val.seconds * 1000);
+  else if (typeof val === 'number') d = new Date(val);
+  else if (typeof val === 'string') {
+    const p = Date.parse(val);
+    if (!isNaN(p)) d = new Date(p);
+  }
+  if (d && !isNaN(d.getTime())) {
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    let h = d.getHours();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${h}:${min} ${ampm}`;
+  }
+  return String(val);
+}
+
+function getExpectedDeliveryForOrder(order) {
+  if (order && order.estimatedDelivery && typeof order.estimatedDelivery === 'string' && order.estimatedDelivery.trim() !== '') {
+    return order.estimatedDelivery.trim();
+  }
+  const pinCode = order?.pinCode || '';
+  const state = order?.state || '';
+  const orderDate = getOrderDateObj(order);
+  return formatDynamicDeliveryDateRange(pinCode, state, orderDate);
+}
+
+function isOrderCancellable(order) {
+  if (!order) return false;
+  const status = (order.status || order.orderStatus || 'Processing').trim().toLowerCase();
+  const nonCancellable = ['shipped', 'out for delivery', 'delivered', 'cancelled'];
+  if (nonCancellable.includes(status)) {
+    return false;
+  }
+  const createdMs = getOrderTimestamp(order);
+  if (!createdMs) return false;
+  const now = Date.now();
+  const diffMs = now - createdMs;
+  const twentyFourHoursMs = 24 * 60 * 60 * 1000;
+  return diffMs >= 0 && diffMs <= twentyFourHoursMs;
+}
+
+window.handleCustomerCancelOrder = async function(orderId) {
+  let order = currentCustomerOrders.find(o => o.id === orderId || o.orderId === orderId);
+  if (!order) {
+    const adminOrders = getAdminOrders();
+    order = adminOrders.find(o => o.id === orderId || o.orderId === orderId);
+    if (order && !currentCustomerOrders.includes(order)) {
+      currentCustomerOrders.push(order);
+    }
+  }
+  if (!order) return;
+
+  if (!isOrderCancellable(order)) {
+    alert('This order cannot be cancelled as the 24-hour cancellation period has passed or the order has already shipped.');
+    return;
+  }
+
+  const displayNum = getDisplayOrderNumber(order);
+  const confirmed = window.confirm(`Are you sure you want to cancel Order #${displayNum}?`);
+  if (!confirmed) return;
+
+  const nowIso = new Date().toISOString();
+
+  // 1. Update Firestore order doc
+  if (window.fbDb && window.fbFns) {
+    try {
+      const docRef = window.fbFns.doc(window.fbDb, 'orders', order.id || order.orderId);
+      await window.fbFns.updateDoc(docRef, {
+        status: 'Cancelled',
+        orderStatus: 'Cancelled',
+        cancelledBy: 'Customer',
+        cancelledAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso,
+        updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso
+      });
+    } catch (err) {
+      console.warn('Firestore customer cancel order error:', err);
+    }
+  }
+
+  // 2. Update local customer state
+  order.status = 'Cancelled';
+  order.orderStatus = 'Cancelled';
+  order.cancelledBy = 'Customer';
+  order.cancelledAt = nowIso;
+
+  // 3. Update local admin store
+  try {
+    const adminOrders = getAdminOrders();
+    const adminOrder = adminOrders.find(o => o.id === orderId || o.orderId === orderId);
+    if (adminOrder) {
+      adminOrder.status = 'Cancelled';
+      adminOrder.orderStatus = 'Cancelled';
+      adminOrder.cancelledBy = 'Customer';
+      adminOrder.cancelledAt = nowIso;
+      saveAdminOrders(adminOrders);
+    }
+  } catch (e) {}
+
+  // 4. Re-render customer UI immediately
+  renderCustomerOrdersList(currentCustomerOrders);
+
+  // 5. Broadcast event so Admin panel updates instantly
+  window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
+    detail: { id: order.id || order.orderId, status: 'Cancelled', cancelledBy: 'Customer' }
+  }));
+  if (typeof renderAdminOrders === 'function') {
+    renderAdminOrders();
+  }
+};
+
 function renderCustomerOrdersList(orders) {
+  if (Array.isArray(orders)) {
+    currentCustomerOrders = orders;
+  }
   const listEl = document.getElementById('customerMyOrdersList');
   const badgeEl = document.getElementById('customerOrdersCountBadge');
   if (!listEl) return;
@@ -1957,19 +2122,24 @@ function renderCustomerOrdersList(orders) {
   listEl.innerHTML = orders.map(order => {
     const rawStatus = order.status || order.orderStatus || 'Processing';
     const statusClass = 'my-order-status-' + rawStatus.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    const orderId = order.id || order.orderId || '—';
+    const orderDocId = order.id || order.orderId || '—';
+    const displayNum = getDisplayOrderNumber(order);
     const productName = order.product || order.productName || 'Designer Outfit';
     const size = order.size || 'Standard';
+    const qty = order.quantity || 1;
     const amount = order.amount || order.price || '—';
-    const displayDate = formatOrderDisplayDate(order);
+    const orderDateFormatted = formatOrderDisplayDate(order);
+    const expectedDeliveryFormatted = getExpectedDeliveryForOrder(order);
     const customMsg = (order.customMessage || '').trim();
+    const cancellable = isOrderCancellable(order);
+    const isCancelled = rawStatus === 'Cancelled';
 
     return `
-      <div class="my-order-card" data-order-id="${escapeHtml(orderId)}">
+      <div class="my-order-card" data-order-id="${escapeHtml(orderDocId)}">
         <div class="my-order-card-header">
           <div class="my-order-id-wrap">
             <span class="my-order-id-label">Order</span>
-            <span class="my-order-id">#${escapeHtml(orderId)}</span>
+            <span class="my-order-id">#${escapeHtml(displayNum)}</span>
           </div>
           <span class="my-order-status-pill ${statusClass}">${escapeHtml(rawStatus)}</span>
         </div>
@@ -1978,11 +2148,25 @@ function renderCustomerOrdersList(orders) {
             <h4 class="my-order-product-name">${escapeHtml(productName)}</h4>
             <div class="my-order-meta">
               <span>Size: <strong>${escapeHtml(size)}</strong></span>
+              <span>•</span>
+              <span>Qty: <strong>${qty}</strong></span>
             </div>
           </div>
           <div class="my-order-amount">${escapeHtml(amount)}</div>
         </div>
-        ${customMsg ? `
+
+        <div class="my-order-dates-section">
+          <div class="my-order-date-item">
+            <span class="my-order-date-label">Order Date:</span>
+            <span class="my-order-date-val">${escapeHtml(orderDateFormatted)}</span>
+          </div>
+          <div class="my-order-date-item">
+            <span class="my-order-date-label">Expected Delivery:</span>
+            <span class="my-order-date-val my-order-delivery-val">${escapeHtml(expectedDeliveryFormatted)}</span>
+          </div>
+        </div>
+
+        ${(rawStatus === 'Other' && customMsg) || customMsg ? `
           <div class="my-order-custom-msg-box">
             <div class="my-order-custom-msg-header">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -1991,11 +2175,21 @@ function renderCustomerOrdersList(orders) {
             <p class="my-order-custom-msg-text">${escapeHtml(customMsg)}</p>
           </div>
         ` : ''}
+
         <div class="my-order-footer">
-          <div class="my-order-date">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-            <span>${escapeHtml(displayDate)}</span>
-          </div>
+          ${cancellable ? `
+            <div class="my-order-cancel-wrap">
+              <button type="button" class="my-order-cancel-btn" onclick="handleCustomerCancelOrder('${escapeHtml(orderDocId)}')">
+                Cancel Order
+              </button>
+              <span class="my-order-cancel-hint">Within 24 hours of placing order</span>
+            </div>
+          ` : isCancelled ? `
+            <div class="my-order-cancelled-notice">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              <span>${order.cancelledBy === 'Customer' ? 'Cancelled by you' : 'Order Cancelled'}</span>
+            </div>
+          ` : ''}
         </div>
       </div>
     `;
@@ -2061,10 +2255,12 @@ function setupCustomerOrdersListener(userOrCustomer) {
         fetched.push({
           id: data.orderId || docSnap.id,
           orderId: data.orderId || docSnap.id,
+          orderNumber: data.orderNumber || null,
           userId: data.userId || uid,
           product: data.product || data.productName || 'Designer Outfit',
           productName: data.productName || data.product || 'Designer Outfit',
           size: data.size || 'Standard',
+          quantity: data.quantity || 1,
           amount: data.amount || data.price || '₹0',
           price: data.price || data.amount || '₹0',
           status: data.orderStatus || data.status || 'Processing',
@@ -2072,8 +2268,15 @@ function setupCustomerOrdersListener(userOrCustomer) {
           customMessage: data.customMessage || '',
           date: data.date || 'Recent',
           createdAt: data.createdAt || null,
+          estimatedDelivery: data.estimatedDelivery || '',
+          state: data.state || '',
+          pinCode: data.pinCode || '',
           customerName: data.customerName || '',
-          customerEmail: data.customerEmail || ''
+          customerEmail: data.customerEmail || '',
+          cancelledBy: data.cancelledBy || '',
+          cancelledAt: data.cancelledAt || null,
+          paymentMethod: data.paymentMethod || 'Prepaid / Online',
+          address: data.address || data.fullAddress || ''
         });
       });
       processAndRender(fetched);
@@ -2088,13 +2291,14 @@ function setupCustomerOrdersListener(userOrCustomer) {
 // Live update listener for instant same-window admin updates
 window.addEventListener('adminOrderStatusChanged', (e) => {
   if (!e.detail || !e.detail.id) return;
-  const { id, status, customMessage } = e.detail;
+  const { id, status, customMessage, cancelledBy } = e.detail;
   let changed = false;
   currentCustomerOrders.forEach(o => {
     if (o.id === id || o.orderId === id) {
       o.status = status;
       o.orderStatus = status;
       if (typeof customMessage !== 'undefined') o.customMessage = customMessage;
+      if (typeof cancelledBy !== 'undefined') o.cancelledBy = cancelledBy;
       changed = true;
     }
   });
@@ -2723,7 +2927,11 @@ window.openCheckoutModal = openCheckoutModal;
 window.closeCheckoutModal = closeCheckoutModal;
 window.ORDER_STATUS_OPTIONS = ORDER_STATUS_OPTIONS;
 window.getOrderTimestamp = getOrderTimestamp;
+window.getDisplayOrderNumber = getDisplayOrderNumber;
 window.formatOrderDisplayDate = formatOrderDisplayDate;
+window.getExpectedDeliveryForOrder = getExpectedDeliveryForOrder;
+window.isOrderCancellable = isOrderCancellable;
+window.handleCustomerCancelOrder = handleCustomerCancelOrder;
 window.renderCustomerOrdersList = renderCustomerOrdersList;
 window.setupCustomerOrdersListener = setupCustomerOrdersListener;
 window.getAdminOrders = getAdminOrders;
@@ -2742,6 +2950,7 @@ const DEFAULT_ADMIN_ORDERS = [
   {
     id: 'JAY-1048',
     orderId: 'JAY-1048',
+    orderNumber: '1048',
     customerName: 'Priya Sharma',
     customerEmail: 'priya.sharma@example.com',
     customerPhone: '+91 98200 12345',
@@ -2756,11 +2965,17 @@ const DEFAULT_ADMIN_ORDERS = [
     orderStatus: 'Processing',
     customMessage: '',
     address: 'Flat 402, Green Meadows, Anna Nagar, Chennai 600040',
+    state: 'Tamil Nadu',
+    pinCode: '600040',
+    estimatedDelivery: '7–9 October 2026',
+    cancelledBy: '',
+    cancelledAt: null,
     paymentMethod: 'Prepaid (UPI)'
   },
   {
     id: 'JAY-1047',
     orderId: 'JAY-1047',
+    orderNumber: '1047',
     customerName: 'Ananya Reddy',
     customerEmail: 'ananya.r@example.com',
     customerPhone: '+91 98490 23456',
@@ -2775,11 +2990,17 @@ const DEFAULT_ADMIN_ORDERS = [
     orderStatus: 'Shipped',
     customMessage: '',
     address: '12, Jubilee Hills, Hyderabad 500033',
+    state: 'Telangana',
+    pinCode: '500033',
+    estimatedDelivery: '5–7 October 2026',
+    cancelledBy: '',
+    cancelledAt: null,
     paymentMethod: 'Credit Card (HDFC)'
   },
   {
     id: 'JAY-1046',
     orderId: 'JAY-1046',
+    orderNumber: '1046',
     customerName: 'Meera Nair',
     customerEmail: 'meera.nair@example.com',
     customerPhone: '+91 97455 34567',
@@ -2794,11 +3015,17 @@ const DEFAULT_ADMIN_ORDERS = [
     orderStatus: 'Delivered',
     customMessage: '',
     address: '7A, Skyline Apts, Panampilly Nagar, Kochi 682036',
+    state: 'Kerala',
+    pinCode: '682036',
+    estimatedDelivery: '3–5 October 2026',
+    cancelledBy: '',
+    cancelledAt: null,
     paymentMethod: 'Net Banking'
   },
   {
     id: 'JAY-1045',
     orderId: 'JAY-1045',
+    orderNumber: '1045',
     customerName: 'Dr. Pooja Chawla',
     customerEmail: 'pooja.c@example.com',
     customerPhone: '+91 98111 45678',
@@ -2813,11 +3040,17 @@ const DEFAULT_ADMIN_ORDERS = [
     orderStatus: 'Delivered',
     customMessage: '',
     address: 'C-14, Vasant Vihar, New Delhi 110057',
+    state: 'Delhi',
+    pinCode: '110057',
+    estimatedDelivery: '1–3 October 2026',
+    cancelledBy: '',
+    cancelledAt: null,
     paymentMethod: 'Prepaid (UPI)'
   },
   {
     id: 'JAY-1044',
     orderId: 'JAY-1044',
+    orderNumber: '1044',
     customerName: 'Tanvi Patel',
     customerEmail: 'tanvi.p@example.com',
     customerPhone: '+91 99099 56789',
@@ -2832,6 +3065,11 @@ const DEFAULT_ADMIN_ORDERS = [
     orderStatus: 'Confirmed',
     customMessage: '',
     address: '801, Riviera Heights, Bodakdev, Ahmedabad 380054',
+    state: 'Gujarat',
+    pinCode: '380054',
+    estimatedDelivery: '28–30 September 2026',
+    cancelledBy: '',
+    cancelledAt: null,
     paymentMethod: 'Debit Card'
   }
 ];
@@ -3087,12 +3325,14 @@ function renderAdminOrders() {
           ${orders.map(order => {
             const currentStatus = order.status || order.orderStatus || 'Processing';
             const isOther = currentStatus === 'Other';
+            const isCancelled = currentStatus === 'Cancelled';
             const customMsg = order.customMessage || '';
+            const displayNum = getDisplayOrderNumber(order);
             return `
               <tr>
                 <td>
                   <div class="admin-customer-name">${escapeHtml(order.customerName)}</div>
-                  <div class="admin-customer-sub">#${escapeHtml(order.id)}</div>
+                  <div class="admin-customer-sub">Order #${escapeHtml(displayNum)}</div>
                 </td>
                 <td>
                   <div class="admin-product-title">${escapeHtml(order.product)}</div>
@@ -3107,6 +3347,9 @@ function renderAdminOrders() {
                       <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
                     `).join('')}
                   </select>
+                  ${isCancelled && order.cancelledBy === 'Customer' ? `
+                    <div><span class="admin-cancelled-tag-inline">Cancelled by Customer</span></div>
+                  ` : ''}
                   <div class="admin-custom-msg-wrap" id="adminCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block;' : 'display: none;'}">
                     <input type="text" class="admin-custom-msg-input" id="adminCustomInput_${escapeHtml(order.id)}"
                       placeholder="Type custom status message..."
@@ -3233,74 +3476,154 @@ function renderAdminHelp() {
 
 function showOrderDetailsModal(orderId) {
   const orders = getAdminOrders();
-  const order = orders.find(o => o.id === orderId);
+  const order = orders.find(o => o.id === orderId || o.orderId === orderId);
   if (!order) return;
 
   const currentStatus = order.status || order.orderStatus || 'Processing';
   const isOther = currentStatus === 'Other';
+  const isCancelled = currentStatus === 'Cancelled';
   const customMsg = order.customMessage || '';
+  const displayNum = getDisplayOrderNumber(order);
+  const displayDate = formatOrderDisplayDate(order);
+  const expectedDel = getExpectedDeliveryForOrder(order);
 
   const content = `
-    <div class="admin-detail-grid">
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Order Number</span>
-        <span class="admin-detail-val"><strong>#${escapeHtml(order.id)}</strong></span>
-      </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Order Date</span>
-        <span class="admin-detail-val">${escapeHtml(order.date || 'Recent')}</span>
-      </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Customer Name</span>
-        <span class="admin-detail-val"><strong>${escapeHtml(order.customerName)}</strong></span>
-      </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Contact Email</span>
-        <span class="admin-detail-val">${order.customerEmail ? `<a href="mailto:${escapeHtml(order.customerEmail)}">${escapeHtml(order.customerEmail)}</a>` : '—'}</span>
-      </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Phone</span>
-        <span class="admin-detail-val">${order.customerPhone && order.customerPhone !== '—' ? `<a href="tel:${escapeHtml(order.customerPhone)}">${escapeHtml(order.customerPhone)}</a>` : '—'}</span>
-      </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Order Status</span>
-        <select class="admin-status-dropdown" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
-          ${ORDER_STATUS_OPTIONS.map(opt => `
-            <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
-          `).join('')}
-        </select>
-        <div class="admin-custom-msg-wrap" id="modalCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block; margin-top: 8px;' : 'display: none; margin-top: 8px;'}">
-          <input type="text" class="admin-custom-msg-input" id="modalCustomInput_${escapeHtml(order.id)}"
-            placeholder="Type custom status message (e.g. Fabric not found)..."
-            value="${escapeHtml(customMsg)}"
-            oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
-            onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
-            onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
+    <div class="admin-order-modal-body">
+      <!-- 1. ORDER DETAILS -->
+      <div class="admin-modal-section">
+        <div class="admin-modal-sec-header">
+          <span class="admin-modal-sec-tag">01</span>
+          <h4 class="admin-modal-sec-title">ORDER DETAILS</h4>
+        </div>
+        <div class="admin-modal-grid-2">
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Order Number</span>
+            <span class="admin-modal-item-value admin-order-number-val">#${escapeHtml(displayNum)}</span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Order Date</span>
+            <span class="admin-modal-item-value">${escapeHtml(displayDate)}</span>
+          </div>
         </div>
       </div>
-      <div class="admin-detail-block admin-detail-full">
-        <span class="admin-detail-label">Shipping Address</span>
-        <span class="admin-detail-val">${escapeHtml(order.address)}</span>
+
+      <!-- 2. CUSTOMER -->
+      <div class="admin-modal-section">
+        <div class="admin-modal-sec-header">
+          <span class="admin-modal-sec-tag">02</span>
+          <h4 class="admin-modal-sec-title">CUSTOMER</h4>
+        </div>
+        <div class="admin-modal-grid-3">
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Customer Name</span>
+            <span class="admin-modal-item-value"><strong>${escapeHtml(order.customerName || 'Customer')}</strong></span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Email</span>
+            <span class="admin-modal-item-value">${order.customerEmail ? `<a href="mailto:${escapeHtml(order.customerEmail)}">${escapeHtml(order.customerEmail)}</a>` : '—'}</span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Phone</span>
+            <span class="admin-modal-item-value">${order.customerPhone && order.customerPhone !== '—' ? `<a href="tel:${escapeHtml(order.customerPhone)}">${escapeHtml(order.customerPhone)}</a>` : '—'}</span>
+          </div>
+        </div>
       </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Product Name</span>
-        <span class="admin-detail-val"><strong>${escapeHtml(order.product)}</strong></span>
+
+      <!-- 3. DELIVERY -->
+      <div class="admin-modal-section">
+        <div class="admin-modal-sec-header">
+          <span class="admin-modal-sec-tag">03</span>
+          <h4 class="admin-modal-sec-title">DELIVERY</h4>
+        </div>
+        <div class="admin-modal-grid-1">
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Shipping Address</span>
+            <span class="admin-modal-item-value">${escapeHtml(order.address || order.fullAddress || '—')}</span>
+          </div>
+          <div class="admin-modal-item" style="margin-top: 6px;">
+            <span class="admin-modal-item-label">Expected Delivery</span>
+            <span class="admin-modal-item-value admin-expected-del-val">${escapeHtml(expectedDel)}</span>
+          </div>
+        </div>
       </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Size & Quantity</span>
-        <span class="admin-detail-val">Size: ${escapeHtml(order.size)} (Qty: ${order.quantity})</span>
+
+      <!-- 4. PRODUCT -->
+      <div class="admin-modal-section">
+        <div class="admin-modal-sec-header">
+          <span class="admin-modal-sec-tag">04</span>
+          <h4 class="admin-modal-sec-title">PRODUCT</h4>
+        </div>
+        <div class="admin-modal-grid-4">
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Product</span>
+            <span class="admin-modal-item-value"><strong>${escapeHtml(order.product || order.productName || 'Designer Outfit')}</strong></span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Size</span>
+            <span class="admin-modal-item-value">${escapeHtml(order.size || 'Standard')}</span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Quantity</span>
+            <span class="admin-modal-item-value">${order.quantity || 1}</span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Amount</span>
+            <span class="admin-modal-item-value admin-amount-val">${escapeHtml(order.amount || order.price || '₹0')}</span>
+          </div>
+        </div>
       </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Payment Method</span>
-        <span class="admin-detail-val">${escapeHtml(order.paymentMethod)}</span>
+
+      <!-- 5. PAYMENT -->
+      <div class="admin-modal-section">
+        <div class="admin-modal-sec-header">
+          <span class="admin-modal-sec-tag">05</span>
+          <h4 class="admin-modal-sec-title">PAYMENT</h4>
+        </div>
+        <div class="admin-modal-grid-1">
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Payment Method</span>
+            <span class="admin-modal-item-value">${escapeHtml(order.paymentMethod || 'Prepaid / Online')}</span>
+          </div>
+        </div>
       </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Total Amount</span>
-        <span class="admin-detail-val"><strong style="font-size: 16px; color: var(--espresso);">${escapeHtml(order.amount)}</strong></span>
+
+      <!-- 6. ORDER STATUS -->
+      <div class="admin-modal-section admin-modal-sec-status">
+        <div class="admin-modal-sec-header">
+          <span class="admin-modal-sec-tag">06</span>
+          <h4 class="admin-modal-sec-title">ORDER STATUS</h4>
+        </div>
+        ${isCancelled ? `
+          <div class="admin-cancelled-alert">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div>
+              <strong>Order Status: Cancelled</strong>
+              ${order.cancelledBy === 'Customer' ? '<span class="admin-cancelled-by-pill">Cancelled by: Customer</span>' : ''}
+              ${order.cancelledAt ? `<div style="font-size: 11.5px; margin-top: 3px; opacity: 0.85;">Cancelled on: ${escapeHtml(formatOrderDateTime(order.cancelledAt))}</div>` : ''}
+            </div>
+          </div>
+        ` : ''}
+        <div class="admin-status-control-box">
+          <label class="admin-modal-item-label" style="display: block; margin-bottom: 6px;">Status</label>
+          <select class="admin-status-dropdown" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
+            ${ORDER_STATUS_OPTIONS.map(opt => `
+              <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
+            `).join('')}
+          </select>
+          <div class="admin-custom-msg-wrap" id="modalCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block; margin-top: 10px;' : 'display: none; margin-top: 10px;'}">
+            <label class="admin-modal-item-label" style="display: block; margin-bottom: 4px;">Admin Custom Message</label>
+            <input type="text" class="admin-custom-msg-input" id="modalCustomInput_${escapeHtml(order.id)}"
+              placeholder="Fabric not found — this may take some time to deliver the product."
+              value="${escapeHtml(customMsg)}"
+              oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+              onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+              onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
+          </div>
+        </div>
       </div>
     </div>
   `;
-  openAdminModal(`Order #${order.id} Details`, content);
+  openAdminModal(`Order #${displayNum} Details`, content);
 }
 
 function showCustomisationDetailsModal(reqId) {
@@ -3438,6 +3761,16 @@ window.handleAdminOrderStatusChange = async function(id, newStatus) {
         orderStatus: newStatus,
         updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
       };
+      if (newStatus === 'Cancelled') {
+        if (!order || !order.cancelledBy) {
+          updateData.cancelledBy = 'Admin';
+          updateData.cancelledAt = window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString();
+          if (order) {
+            order.cancelledBy = 'Admin';
+            order.cancelledAt = new Date().toISOString();
+          }
+        }
+      }
       if (order && typeof order.customMessage !== 'undefined') {
         updateData.customMessage = order.customMessage;
       }
@@ -3449,7 +3782,7 @@ window.handleAdminOrderStatusChange = async function(id, newStatus) {
 
   // Broadcast same-window event for instant local update
   window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
-    detail: { id, status: newStatus, customMessage: order?.customMessage || '' }
+    detail: { id, status: newStatus, customMessage: order?.customMessage || '', cancelledBy: order?.cancelledBy || '' }
   }));
 };
 
@@ -3509,6 +3842,7 @@ function setupAdminOrdersListener() {
           fbOrders.push({
             id: data.orderId || d.id,
             orderId: data.orderId || d.id,
+            orderNumber: data.orderNumber || null,
             userId: data.userId || '',
             date: data.date || 'Recent',
             createdAt: data.createdAt || null,
@@ -3524,7 +3858,12 @@ function setupAdminOrdersListener() {
             orderStatus: data.orderStatus || data.status || 'Processing',
             customMessage: data.customMessage || '',
             paymentMethod: data.paymentMethod || 'Online',
-            address: data.address || data.fullAddress || '—'
+            address: data.address || data.fullAddress || '—',
+            estimatedDelivery: data.estimatedDelivery || '',
+            state: data.state || '',
+            pinCode: data.pinCode || '',
+            cancelledBy: data.cancelledBy || '',
+            cancelledAt: data.cancelledAt || null
           });
         });
         fbOrders.sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
@@ -3557,6 +3896,7 @@ async function loadAdminDataFromFirestore() {
         fbOrders.push({
           id: data.orderId || d.id,
           orderId: data.orderId || d.id,
+          orderNumber: data.orderNumber || null,
           userId: data.userId || '',
           date: data.date || 'Recent',
           createdAt: data.createdAt || null,
@@ -3572,7 +3912,12 @@ async function loadAdminDataFromFirestore() {
           orderStatus: data.orderStatus || data.status || 'Processing',
           customMessage: data.customMessage || '',
           paymentMethod: data.paymentMethod || 'Online',
-          address: data.address || data.fullAddress || '—'
+          address: data.address || data.fullAddress || '—',
+          estimatedDelivery: data.estimatedDelivery || '',
+          state: data.state || '',
+          pinCode: data.pinCode || '',
+          cancelledBy: data.cancelledBy || '',
+          cancelledAt: data.cancelledAt || null
         });
       });
       fbOrders.sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));

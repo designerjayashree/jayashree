@@ -39,7 +39,13 @@ service cloud.firestore {
         request.resource.data.customerEmail == request.auth.token.email ||
         isAdmin()
       );
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        request.auth != null && 
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'Cancelled' &&
+        !(resource.data.status in ['Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'])
+      );
+      allow delete: if isAdmin();
     }
 
     // Delivery Data
