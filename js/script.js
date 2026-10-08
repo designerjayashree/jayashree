@@ -2051,10 +2051,10 @@ function isOrderCancellable(order) {
 }
 
 async function executeCustomerOrderCancellation(orderId, btn) {
-  let order = currentCustomerOrders.find(o => o.id === orderId || o.orderId === orderId);
+  let order = currentCustomerOrders.find(o => (o.docId && o.docId === orderId) || o.id === orderId || o.orderId === orderId);
   if (!order) {
     const adminOrders = getAdminOrders();
-    order = adminOrders.find(o => o.id === orderId || o.orderId === orderId);
+    order = adminOrders.find(o => (o.docId && o.docId === orderId) || o.id === orderId || o.orderId === orderId);
     if (order && !currentCustomerOrders.includes(order)) {
       currentCustomerOrders.push(order);
     }
@@ -2096,6 +2096,7 @@ async function executeCustomerOrderCancellation(orderId, btn) {
   }
 
   const nowIso = new Date().toISOString();
+  const targetDocId = order.docId || order.id || order.orderId;
 
   // 4. Immediately update local customer state synchronously
   order.status = 'Cancelled';
@@ -2106,7 +2107,14 @@ async function executeCustomerOrderCancellation(orderId, btn) {
   // 5. Immediately update local admin store synchronously
   try {
     const adminOrders = getAdminOrders();
-    const adminOrder = adminOrders.find(o => o.id === orderId || o.orderId === orderId);
+    const adminOrder = adminOrders.find(o =>
+      (o.docId && o.docId === targetDocId) ||
+      o.id === targetDocId ||
+      o.orderId === targetDocId ||
+      o.id === order.id ||
+      o.orderId === order.orderId ||
+      (order.orderNumber && (o.orderNumber === order.orderNumber || o.displayOrderNumber === order.orderNumber))
+    );
     if (adminOrder) {
       adminOrder.status = 'Cancelled';
       adminOrder.orderStatus = 'Cancelled';
@@ -2121,25 +2129,29 @@ async function executeCustomerOrderCancellation(orderId, btn) {
 
   // Broadcast event so Admin panel updates instantly
   window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
-    detail: { id: order.id || order.orderId, status: 'Cancelled', cancelledBy: 'customer', cancelledAt: nowIso }
+    detail: { id: targetDocId, status: 'Cancelled', cancelledBy: 'customer', cancelledAt: nowIso }
   }));
   if (typeof renderAdminOrders === 'function') {
     renderAdminOrders();
   }
 
-  // 7. Update Firestore doc in background asynchronously (DO NOT DELETE THE ORDER DOCUMENT)
+  // 7. Update Firestore doc to persist cancellation (DO NOT DELETE THE ORDER DOCUMENT)
   if (window.fbDb && window.fbFns) {
     try {
-      const docRef = window.fbFns.doc(window.fbDb, 'orders', order.id || order.orderId);
-      window.fbFns.updateDoc(docRef, {
+      const docRef = window.fbFns.doc(window.fbDb, 'orders', targetDocId);
+      await window.fbFns.updateDoc(docRef, {
         status: 'Cancelled',
         orderStatus: 'Cancelled',
         cancelledBy: 'customer',
         cancelledAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso,
         updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso
-      }).catch(err => {
-        console.warn('Firestore customer cancel order error:', err);
       });
+      // Keep verified state
+      order.status = 'Cancelled';
+      order.orderStatus = 'Cancelled';
+      order.cancelledBy = 'customer';
+      order.cancelledAt = nowIso;
+      renderCustomerOrdersList(currentCustomerOrders);
     } catch (err) {
       console.warn('Firestore customer cancel order error:', err);
     }
@@ -2169,11 +2181,32 @@ function attachHoldToCancelListeners(container) {
     let isCompleted = false;
     let startTimestamp = 0;
     let rafId = null;
+    let holdTimeoutId = null;
+
+    function completeHold() {
+      if (isCompleted) return;
+      isCompleted = true;
+      isHolding = false;
+      if (holdTimeoutId) {
+        clearTimeout(holdTimeoutId);
+        holdTimeoutId = null;
+      }
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      // Trigger cancellation execution immediately without intermediate states
+      window.executeCustomerOrderCancellation(orderId, btn);
+    }
 
     function resetHoldAnimation() {
       if (isCompleted) return;
       if (isHolding) {
         isHolding = false;
+      }
+      if (holdTimeoutId) {
+        clearTimeout(holdTimeoutId);
+        holdTimeoutId = null;
       }
       if (rafId) {
         cancelAnimationFrame(rafId);
@@ -2197,16 +2230,7 @@ function attachHoldToCancelListeners(container) {
       }
 
       if (progressRatio >= 1) {
-        // Full 2 seconds completed
-        isCompleted = true;
-        isHolding = false;
-        if (rafId) {
-          cancelAnimationFrame(rafId);
-          rafId = null;
-        }
-
-        // Trigger cancellation execution immediately without intermediate states
-        window.executeCustomerOrderCancellation(orderId, btn);
+        completeHold();
         return;
       }
 
@@ -2216,7 +2240,7 @@ function attachHoldToCancelListeners(container) {
     function startHold(e) {
       if (isCompleted || btn.disabled) return;
       // Filter out non-primary clicks for mouse
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (e && e.pointerType === 'mouse' && e.button !== 0) return;
 
       isHolding = true;
       btn.classList.add('is-holding');
@@ -2225,6 +2249,16 @@ function attachHoldToCancelListeners(container) {
         fillEl.style.width = '0%';
       }
       startTimestamp = performance.now();
+
+      // Reliable 2-second completion timer ensures hold finishes even if rAF is throttled
+      if (holdTimeoutId) clearTimeout(holdTimeoutId);
+      holdTimeoutId = setTimeout(() => {
+        if (isHolding && !isCompleted) {
+          if (fillEl) fillEl.style.width = '100%';
+          completeHold();
+        }
+      }, HOLD_TIME_MS);
+
       rafId = requestAnimationFrame(onHoldProgress);
     }
 
@@ -2562,7 +2596,8 @@ function setupCustomerOrdersListener(userOrCustomer) {
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         fetched.push({
-          id: data.orderId || docSnap.id,
+          docId: docSnap.id,
+          id: docSnap.id,
           orderId: data.orderId || docSnap.id,
           orderNumber: data.orderNumber || null,
           displayOrderNumber: data.displayOrderNumber || data.orderNumber || null,
