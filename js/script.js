@@ -2486,18 +2486,14 @@ function renderCustomerOrdersList(orders) {
           <div class="my-order-amount">${escapeHtml(amount)}</div>
         </div>
 
-        <div class="my-order-dates-section">
-          <div class="my-order-date-item">
-            <span class="my-order-date-label">Order Date:</span>
-            <span class="my-order-date-val">${escapeHtml(orderDateFormatted)}</span>
-          </div>
-          ${isCustom ? `
+        ${!isCancelled ? `
+          <div class="my-order-dates-section">
             <div class="my-order-date-item">
-              <span class="my-order-date-label">Expected Delivery:</span>
+              <span class="my-order-date-label">Estimated Delivery:</span>
               <span class="my-order-date-val my-order-delivery-val">${escapeHtml(expectedDeliveryFormatted)}</span>
             </div>
-          ` : ''}
-        </div>
+          </div>
+        ` : ''}
 
         ${isCustom && customisationDetailsHtml ? customisationDetailsHtml : ''}
 
