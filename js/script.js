@@ -2097,29 +2097,13 @@ async function executeCustomerOrderCancellation(orderId, btn) {
 
   const nowIso = new Date().toISOString();
 
-  // 4. Update Firestore doc (DO NOT DELETE THE ORDER DOCUMENT)
-  if (window.fbDb && window.fbFns) {
-    try {
-      const docRef = window.fbFns.doc(window.fbDb, 'orders', order.id || order.orderId);
-      await window.fbFns.updateDoc(docRef, {
-        status: 'Cancelled',
-        orderStatus: 'Cancelled',
-        cancelledBy: 'customer',
-        cancelledAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso,
-        updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso
-      });
-    } catch (err) {
-      console.warn('Firestore customer cancel order error:', err);
-    }
-  }
-
-  // 5. Update local customer state
+  // 4. Immediately update local customer state synchronously
   order.status = 'Cancelled';
   order.orderStatus = 'Cancelled';
   order.cancelledBy = 'customer';
   order.cancelledAt = nowIso;
 
-  // 6. Update local admin store
+  // 5. Immediately update local admin store synchronously
   try {
     const adminOrders = getAdminOrders();
     const adminOrder = adminOrders.find(o => o.id === orderId || o.orderId === orderId);
@@ -2132,7 +2116,7 @@ async function executeCustomerOrderCancellation(orderId, btn) {
     }
   } catch (e) {}
 
-  // 7. The moment 2s hold completes: directly re-render customer UI to show "Cancelled by you"
+  // 6. Hold completes -> immediately show "Cancelled by you" without any intermediate effect, state, or delay
   renderCustomerOrdersList(currentCustomerOrders);
 
   // Broadcast event so Admin panel updates instantly
@@ -2141,6 +2125,24 @@ async function executeCustomerOrderCancellation(orderId, btn) {
   }));
   if (typeof renderAdminOrders === 'function') {
     renderAdminOrders();
+  }
+
+  // 7. Update Firestore doc in background asynchronously (DO NOT DELETE THE ORDER DOCUMENT)
+  if (window.fbDb && window.fbFns) {
+    try {
+      const docRef = window.fbFns.doc(window.fbDb, 'orders', order.id || order.orderId);
+      window.fbFns.updateDoc(docRef, {
+        status: 'Cancelled',
+        orderStatus: 'Cancelled',
+        cancelledBy: 'customer',
+        cancelledAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso,
+        updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso
+      }).catch(err => {
+        console.warn('Firestore customer cancel order error:', err);
+      });
+    } catch (err) {
+      console.warn('Firestore customer cancel order error:', err);
+    }
   }
 }
 
