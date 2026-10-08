@@ -1884,6 +1884,9 @@ const ORDER_STATUS_OPTIONS = [
 
 function getOrderTimestamp(order) {
   if (!order) return 0;
+  if (typeof order.orderTimestamp === 'number' && !isNaN(order.orderTimestamp)) {
+    return order.orderTimestamp;
+  }
   const c = order.createdAt;
   if (c) {
     if (typeof c.toMillis === 'function') return c.toMillis();
@@ -1909,21 +1912,26 @@ function getOrderTimestamp(order) {
       if (!isNaN(parsed)) return parsed;
     }
   }
-  if (typeof order.id === 'string') {
-    const numMatch = order.id.match(/\d{10,}/);
-    if (numMatch) return parseInt(numMatch[0], 10);
+  if (order.orderDate && typeof order.orderDate === 'string') {
+    const parsed = Date.parse(order.orderDate);
+    if (!isNaN(parsed)) return parsed;
   }
   if (order.date && typeof order.date === 'string') {
     const parsed = Date.parse(order.date);
     if (!isNaN(parsed)) return parsed;
+  }
+  if (typeof order.id === 'string') {
+    const numMatch = order.id.match(/\d{10,}/);
+    if (numMatch) return parseInt(numMatch[0], 10);
   }
   return 0;
 }
 
 function getDisplayOrderNumber(order) {
   if (!order) return '1001';
-  if (order.orderNumber) {
-    const clean = String(order.orderNumber).trim();
+  const explicit = order.displayOrderNumber || order.orderNumber;
+  if (explicit) {
+    const clean = String(explicit).trim();
     if (/^\d{4}$/.test(clean)) return clean;
     const digits = clean.replace(/\D/g, '');
     if (digits.length >= 4) return digits.slice(-4);
@@ -1952,6 +1960,7 @@ function getDisplayOrderNumber(order) {
 
 function getOrderDateObj(order) {
   if (!order) return new Date();
+  if (order instanceof Date) return order;
   const c = order.createdAt;
   if (c) {
     if (typeof c.toDate === 'function') return c.toDate();
@@ -1961,6 +1970,10 @@ function getOrderDateObj(order) {
       const parsed = Date.parse(c);
       if (!isNaN(parsed)) return new Date(parsed);
     }
+  }
+  if (order.orderDate && typeof order.orderDate === 'string') {
+    const parsed = Date.parse(order.orderDate);
+    if (!isNaN(parsed)) return new Date(parsed);
   }
   if (order.date && typeof order.date === 'string') {
     const parsed = Date.parse(order.date);
@@ -2000,6 +2013,9 @@ function formatOrderDateTime(val) {
 }
 
 function getExpectedDeliveryForOrder(order) {
+  if (order && order.expectedDelivery && typeof order.expectedDelivery === 'string' && order.expectedDelivery.trim() !== '') {
+    return order.expectedDelivery.trim();
+  }
   if (order && order.estimatedDelivery && typeof order.estimatedDelivery === 'string' && order.estimatedDelivery.trim() !== '') {
     return order.estimatedDelivery.trim();
   }
@@ -2021,7 +2037,7 @@ function isOrderCancellable(order) {
   const now = Date.now();
   const diffMs = now - createdMs;
   const twentyFourHoursMs = 24 * 60 * 60 * 1000;
-  return diffMs >= 0 && diffMs <= twentyFourHoursMs;
+  return diffMs >= -60000 && diffMs <= twentyFourHoursMs;
 }
 
 window.handleCustomerCancelOrder = async function(orderId) {
@@ -2138,8 +2154,8 @@ function renderCustomerOrdersList(orders) {
       <div class="my-order-card" data-order-id="${escapeHtml(orderDocId)}">
         <div class="my-order-card-header">
           <div class="my-order-id-wrap">
-            <span class="my-order-id-label">Order</span>
-            <span class="my-order-id">#${escapeHtml(displayNum)}</span>
+            <span class="my-order-id">ORDER #${escapeHtml(displayNum)}</span>
+            ${order.customisationRequestId ? '<span class="admin-custom-tag" style="margin-left: 6px;">Custom Outfit</span>' : ''}
           </div>
           <span class="my-order-status-pill ${statusClass}">${escapeHtml(rawStatus)}</span>
         </div>
@@ -2256,6 +2272,7 @@ function setupCustomerOrdersListener(userOrCustomer) {
           id: data.orderId || docSnap.id,
           orderId: data.orderId || docSnap.id,
           orderNumber: data.orderNumber || null,
+          displayOrderNumber: data.displayOrderNumber || data.orderNumber || null,
           userId: data.userId || uid,
           product: data.product || data.productName || 'Designer Outfit',
           productName: data.productName || data.product || 'Designer Outfit',
@@ -2265,18 +2282,26 @@ function setupCustomerOrdersListener(userOrCustomer) {
           price: data.price || data.amount || '₹0',
           status: data.orderStatus || data.status || 'Processing',
           orderStatus: data.orderStatus || data.status || 'Processing',
-          customMessage: data.customMessage || '',
-          date: data.date || 'Recent',
+          customMessage: data.customMessage || data.statusMessage || '',
+          statusMessage: data.statusMessage || data.customMessage || '',
+          date: data.orderDate || data.date || 'Recent',
+          orderDate: data.orderDate || data.date || 'Recent',
           createdAt: data.createdAt || null,
-          estimatedDelivery: data.estimatedDelivery || '',
+          orderTimestamp: data.orderTimestamp || null,
+          expectedDelivery: data.expectedDelivery || data.estimatedDelivery || '',
+          estimatedDelivery: data.estimatedDelivery || data.expectedDelivery || '',
           state: data.state || '',
           pinCode: data.pinCode || '',
           customerName: data.customerName || '',
-          customerEmail: data.customerEmail || '',
+          customerEmail: data.customerEmail || data.email || '',
+          email: data.email || data.customerEmail || '',
           cancelledBy: data.cancelledBy || '',
           cancelledAt: data.cancelledAt || null,
           paymentMethod: data.paymentMethod || 'Prepaid / Online',
-          address: data.address || data.fullAddress || ''
+          address: data.deliveryAddress || data.address || data.fullAddress || '',
+          deliveryAddress: data.deliveryAddress || data.address || data.fullAddress || '',
+          customisationRequestId: data.customisationRequestId || null,
+          isCustomOrder: Boolean(data.isCustomOrder || data.customisationRequestId)
         });
       });
       processAndRender(fetched);
@@ -3115,7 +3140,22 @@ const DEFAULT_ADMIN_CUSTOMISATIONS = [
     additionalRequirements: 'Temple festival by 20 Oct 2026. Extra fabric inside hem for future alterations.',
     referenceImage: '',
     submissionDate: '21 Sep 2026',
-    status: 'Quotation Sent'
+    status: 'In Progress'
+  },
+  {
+    id: 'CUST-301',
+    fullName: 'Ananya Sharma',
+    contactNumber: '+91 98200 44556',
+    colour: 'Emerald Green with Antique Gold Border',
+    fabric: 'Raw Silk with Brocade border',
+    design: 'Custom crop top and pleated maxi skirt with matching dupatta',
+    measurements: 'Bust: 34, Waist: 28, Skirt Length: 42',
+    embellishments: 'Handcrafted zari embroidery along neckline and belt',
+    additionalRequirements: 'Bespoke festive collection',
+    referenceImage: '',
+    submissionDate: '18 Sep 2026',
+    status: 'Completed',
+    orderCreated: false
   }
 ];
 
@@ -3257,6 +3297,7 @@ function showAdminDashboard() {
   switchAdminTab(currentAdminTab);
   loadAdminDataFromFirestore();
   setupAdminOrdersListener();
+  setupAdminCustomisationsListener();
 }
 
 function switchAdminTab(tabName) {
@@ -3312,13 +3353,13 @@ function renderAdminOrders() {
       <table class="admin-table">
         <thead>
           <tr>
-            <th>Customer</th>
+            <th>Order & Customer</th>
             <th>Product & Size</th>
-            <th>Qty</th>
+            <th class="th-center">Qty</th>
             <th>Amount</th>
-            <th>Date</th>
+            <th>Order Date</th>
             <th class="admin-status-col">Status</th>
-            <th>Action</th>
+            <th style="text-align: right;">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -3328,19 +3369,30 @@ function renderAdminOrders() {
             const isCancelled = currentStatus === 'Cancelled';
             const customMsg = order.customMessage || '';
             const displayNum = getDisplayOrderNumber(order);
+            const isCustom = Boolean(order.customisationRequestId || order.isCustomOrder);
             return `
               <tr>
-                <td>
-                  <div class="admin-customer-name">${escapeHtml(order.customerName)}</div>
-                  <div class="admin-customer-sub">Order #${escapeHtml(displayNum)}</div>
+                <td class="admin-td-order-cust">
+                  <div class="admin-order-badge-row">
+                    <span class="admin-order-badge">ORDER #${escapeHtml(displayNum)}</span>
+                    ${isCustom ? '<span class="admin-custom-tag">Custom</span>' : ''}
+                  </div>
+                  <div class="admin-customer-name">${escapeHtml(order.customerName || 'Customer')}</div>
+                  <div class="admin-customer-contact">${escapeHtml(order.customerEmail || order.phone || order.contactNumber || '—')}</div>
                 </td>
-                <td>
-                  <div class="admin-product-title">${escapeHtml(order.product)}</div>
-                  <div class="admin-product-meta">Size: <strong>${escapeHtml(order.size)}</strong></div>
+                <td class="admin-td-product">
+                  <div class="admin-product-title">${escapeHtml(order.product || order.productName || 'Designer Outfit')}</div>
+                  <div class="admin-product-meta">Size: <span class="admin-size-pill">${escapeHtml(order.size || 'Standard')}</span></div>
                 </td>
-                <td><strong>${order.quantity}</strong></td>
-                <td><strong style="color: var(--espresso);">${escapeHtml(order.amount)}</strong></td>
-                <td>${escapeHtml(order.date || 'Recent')}</td>
+                <td class="admin-td-qty">
+                  <span class="admin-qty-badge">${order.quantity || 1}</span>
+                </td>
+                <td class="admin-td-amount">
+                  <span class="admin-amount-text">${escapeHtml(order.amount || order.price || '₹0')}</span>
+                </td>
+                <td class="admin-td-date">
+                  <span class="admin-date-text">${escapeHtml(order.date || 'Recent')}</span>
+                </td>
                 <td class="admin-status-control-cell">
                   <select class="admin-order-status-select" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
                     ${ORDER_STATUS_OPTIONS.map(opt => `
@@ -3348,7 +3400,7 @@ function renderAdminOrders() {
                     `).join('')}
                   </select>
                   ${isCancelled && order.cancelledBy === 'Customer' ? `
-                    <div><span class="admin-cancelled-tag-inline">Cancelled by Customer</span></div>
+                    <div class="admin-cancelled-by-wrap"><span class="admin-cancelled-tag-inline">Cancelled by Customer</span></div>
                   ` : ''}
                   <div class="admin-custom-msg-wrap" id="adminCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block;' : 'display: none;'}">
                     <input type="text" class="admin-custom-msg-input" id="adminCustomInput_${escapeHtml(order.id)}"
@@ -3358,9 +3410,8 @@ function renderAdminOrders() {
                       onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
                       onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
                   </div>
-                  ${customMsg && !isOther ? `<div class="admin-custom-msg-preview">${escapeHtml(customMsg)}</div>` : ''}
                 </td>
-                <td>
+                <td class="admin-td-action">
                   <button type="button" class="admin-view-btn" data-action="view-order" data-id="${escapeHtml(order.id)}">Details</button>
                 </td>
               </tr>
@@ -3371,6 +3422,9 @@ function renderAdminOrders() {
     </div>
   `;
 }
+
+const CUSTOMISATION_STATUS_OPTIONS = ['New Request', 'In Review', 'In Progress', 'Completed', 'Cancelled'];
+window.CUSTOMISATION_STATUS_OPTIONS = CUSTOMISATION_STATUS_OPTIONS;
 
 function renderAdminCustomisation() {
   const container = document.getElementById('adminCustomisationContent');
@@ -3394,40 +3448,112 @@ function renderAdminCustomisation() {
       <div class="admin-section-count">${requests.length} ${requests.length === 1 ? 'Request' : 'Requests'}</div>
     </div>
     <div class="admin-card-list">
-      ${requests.map(req => `
-        <div class="admin-item-card">
-          <div class="admin-card-top">
-            <div class="admin-card-header-left">
-              <div class="admin-card-person-name">${escapeHtml(req.fullName)}</div>
-              <div class="admin-card-contact-sub"><a href="tel:${escapeHtml(req.contactNumber)}" style="color: inherit; text-decoration: none;">📞 ${escapeHtml(req.contactNumber)}</a></div>
+      ${requests.map(req => {
+        const currentStatus = req.status || 'New Request';
+        const isCompleted = currentStatus === 'Completed';
+        const statusSlug = currentStatus.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        return `
+          <div class="admin-cust-card" data-req-id="${escapeHtml(req.id)}">
+            <div class="admin-card-header-bar">
+              <div class="admin-card-header-main">
+                <span class="admin-card-sub-tag">REQUEST #${escapeHtml(req.id)}</span>
+                <h3 class="admin-card-person-name">${escapeHtml(req.fullName)}</h3>
+              </div>
+              <div class="admin-card-status-control">
+                <label class="admin-ctrl-label">Status</label>
+                <select class="admin-cust-status-dropdown" onchange="handleAdminCustomisationStatusChange('${escapeHtml(req.id)}', this.value)">
+                  ${CUSTOMISATION_STATUS_OPTIONS.map(opt => `
+                    <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
+                  `).join('')}
+                </select>
+              </div>
             </div>
-            <span class="admin-status-pill admin-status-new">${escapeHtml(req.status)}</span>
+
+            <div class="admin-cust-sections-wrap">
+              <!-- CUSTOMER SECTION -->
+              <div class="admin-cust-subpanel">
+                <div class="admin-cust-sec-title">CUSTOMER</div>
+                <div class="admin-cust-grid-2">
+                  <div class="admin-cust-field">
+                    <span class="admin-cust-label">Full Name</span>
+                    <span class="admin-cust-val"><strong>${escapeHtml(req.fullName)}</strong></span>
+                  </div>
+                  <div class="admin-cust-field">
+                    <span class="admin-cust-label">Contact Number</span>
+                    <span class="admin-cust-val"><a href="tel:${escapeHtml(req.contactNumber)}">${escapeHtml(req.contactNumber)}</a></span>
+                  </div>
+                  <div class="admin-cust-field">
+                    <span class="admin-cust-label">Submission Date</span>
+                    <span class="admin-cust-val">${escapeHtml(req.submissionDate || 'Recent')}</span>
+                  </div>
+                  <div class="admin-cust-field">
+                    <span class="admin-cust-label">Request Status</span>
+                    <div><span class="admin-status-pill admin-status-${statusSlug}">${escapeHtml(currentStatus)}</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- REQUEST SECTION -->
+              <div class="admin-cust-subpanel">
+                <div class="admin-cust-sec-title">REQUEST</div>
+                <div class="admin-cust-grid-specs">
+                  <div class="admin-cust-field">
+                    <span class="admin-cust-label">Colour</span>
+                    <span class="admin-cust-val">${escapeHtml(req.colour || 'Not specified')}</span>
+                  </div>
+                  <div class="admin-cust-field">
+                    <span class="admin-cust-label">Fabric</span>
+                    <span class="admin-cust-val">${escapeHtml(req.fabric || 'Not specified')}</span>
+                  </div>
+                  <div class="admin-cust-field">
+                    <span class="admin-cust-label">Measurements</span>
+                    <span class="admin-cust-val">${escapeHtml(req.measurements || 'Not specified')}</span>
+                  </div>
+                  <div class="admin-cust-field">
+                    <span class="admin-cust-label">Embellishments</span>
+                    <span class="admin-cust-val">${escapeHtml(req.embellishments || req.embellishment || 'Not specified')}</span>
+                  </div>
+                </div>
+                <div class="admin-cust-field-full">
+                  <span class="admin-cust-label">Design</span>
+                  <div class="admin-cust-text-box">${escapeHtml(req.design || 'Not specified')}</div>
+                </div>
+                ${(req.additionalRequirements && req.additionalRequirements !== 'None') ? `
+                  <div class="admin-cust-field-full">
+                    <span class="admin-cust-label">Additional Information</span>
+                    <div class="admin-cust-text-box">${escapeHtml(req.additionalRequirements)}</div>
+                  </div>
+                ` : ''}
+                ${req.referenceImage ? `
+                  <div class="admin-cust-field-full">
+                    <span class="admin-cust-label">Reference Image / Sketch</span>
+                    <div class="admin-cust-ref-img-wrap">📎 ${escapeHtml(req.referenceImage)}</div>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+
+            <div class="admin-cust-card-footer">
+              <div class="admin-cust-order-action-area">
+                ${isCompleted ? (
+                  req.orderCreated ? `
+                    <div class="admin-order-created-badge">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                      <span>Order Created • <strong>Order #${escapeHtml(req.orderNumber || '—')}</strong></span>
+                    </div>
+                  ` : `
+                    <button type="button" class="btn-create-order-cta" onclick="handleCreateOrderFromCustomisation('${escapeHtml(req.id)}')">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                      <span>Create Order</span>
+                    </button>
+                  `
+                ) : ''}
+              </div>
+              <button type="button" class="admin-view-btn" data-action="view-customisation" data-id="${escapeHtml(req.id)}">View Complete Request</button>
+            </div>
           </div>
-          <div class="admin-card-grid-info">
-            <div class="admin-info-item">
-              <span class="admin-info-label">🎨 Colour</span>
-              <span class="admin-info-value">${escapeHtml(req.colour || 'Not specified')}</span>
-            </div>
-            <div class="admin-info-item">
-              <span class="admin-info-label">🧵 Fabric</span>
-              <span class="admin-info-value">${escapeHtml(req.fabric || 'Not specified')}</span>
-            </div>
-            <div class="admin-info-item">
-              <span class="admin-info-label">📐 Measurements</span>
-              <span class="admin-info-value">${escapeHtml(req.measurements || 'Not specified')}</span>
-            </div>
-            <div class="admin-info-item">
-              <span class="admin-info-label">✨ Embellishments</span>
-              <span class="admin-info-value">${escapeHtml(req.embellishments || req.embellishment || 'Not specified')}</span>
-            </div>
-          </div>
-          <div class="admin-message-preview"><strong>👗 Design:</strong> ${escapeHtml(req.design || 'Not specified')}</div>
-          <div class="admin-card-bottom">
-            <span class="admin-card-date">Submitted: ${escapeHtml(req.submissionDate)} • ${escapeHtml(req.id)}${req.referenceImage ? ' • 📎 Image attached' : ''}</span>
-            <button type="button" class="admin-view-btn" data-action="view-customisation" data-id="${req.id}">View Complete Request</button>
-          </div>
-        </div>
-      `).join('')}
+        `;
+      }).join('')}
     </div>
   `;
 }
@@ -3504,6 +3630,14 @@ function showOrderDetailsModal(orderId) {
             <span class="admin-modal-item-label">Order Date</span>
             <span class="admin-modal-item-value">${escapeHtml(displayDate)}</span>
           </div>
+          ${order.customisationRequestId ? `
+            <div class="admin-modal-item" style="grid-column: 1 / -1; margin-top: 4px;">
+              <span class="admin-modal-item-label">Origin</span>
+              <span class="admin-modal-item-value">
+                <span class="admin-custom-tag">Created from Customisation Request #${escapeHtml(order.customisationRequestId)}</span>
+              </span>
+            </div>
+          ` : ''}
         </div>
       </div>
 
@@ -3623,7 +3757,7 @@ function showOrderDetailsModal(orderId) {
       </div>
     </div>
   `;
-  openAdminModal(`Order #${displayNum} Details`, content);
+  openAdminModal(`ORDER #${displayNum} Details`, content);
 }
 
 function showCustomisationDetailsModal(reqId) {
@@ -3631,57 +3765,113 @@ function showCustomisationDetailsModal(reqId) {
   const req = requests.find(r => r.id === reqId);
   if (!req) return;
 
+  const currentStatus = req.status || 'New Request';
+  const isCompleted = currentStatus === 'Completed';
+
   const content = `
-    <div class="admin-detail-grid">
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Full Name</span>
-        <span class="admin-detail-val"><strong>${escapeHtml(req.fullName)}</strong></span>
+    <div class="admin-order-modal-body">
+      <!-- 1. CUSTOMER -->
+      <div class="admin-modal-section">
+        <div class="admin-modal-sec-header">
+          <span class="admin-modal-sec-tag">01</span>
+          <h4 class="admin-modal-sec-title">CUSTOMER</h4>
+        </div>
+        <div class="admin-modal-grid-2">
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Full Name</span>
+            <span class="admin-modal-item-value"><strong>${escapeHtml(req.fullName)}</strong></span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Contact Number</span>
+            <span class="admin-modal-item-value"><a href="tel:${escapeHtml(req.contactNumber)}">${escapeHtml(req.contactNumber)}</a></span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Email</span>
+            <span class="admin-modal-item-value">${req.email ? `<a href="mailto:${escapeHtml(req.email)}">${escapeHtml(req.email)}</a>` : '—'}</span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Submission Date</span>
+            <span class="admin-modal-item-value">${escapeHtml(req.submissionDate || 'Recent')}</span>
+          </div>
+          <div class="admin-modal-item" style="grid-column: 1 / -1; margin-top: 4px;">
+            <span class="admin-modal-item-label">Request Status</span>
+            <select class="admin-status-dropdown" onchange="handleAdminCustomisationStatusChange('${escapeHtml(req.id)}', this.value)">
+              ${CUSTOMISATION_STATUS_OPTIONS.map(opt => `
+                <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
+              `).join('')}
+            </select>
+          </div>
+        </div>
       </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Submission Date</span>
-        <span class="admin-detail-val">${escapeHtml(req.submissionDate)}</span>
+
+      <!-- 2. REQUEST -->
+      <div class="admin-modal-section">
+        <div class="admin-modal-sec-header">
+          <span class="admin-modal-sec-tag">02</span>
+          <h4 class="admin-modal-sec-title">REQUEST</h4>
+        </div>
+        <div class="admin-modal-grid-2">
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Colour</span>
+            <span class="admin-modal-item-value">${escapeHtml(req.colour || 'Not specified')}</span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Fabric</span>
+            <span class="admin-modal-item-value">${escapeHtml(req.fabric || 'Not specified')}</span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Measurements</span>
+            <span class="admin-modal-item-value">${escapeHtml(req.measurements || 'Not specified')}</span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Embellishments</span>
+            <span class="admin-modal-item-value">${escapeHtml(req.embellishments || req.embellishment || 'Not specified')}</span>
+          </div>
+        </div>
+        <div class="admin-modal-item" style="margin-top: 10px;">
+          <span class="admin-modal-item-label">Design</span>
+          <div class="admin-detail-msg-box">${escapeHtml(req.design || 'Not specified')}</div>
+        </div>
+        ${(req.additionalRequirements && req.additionalRequirements !== 'None') ? `
+          <div class="admin-modal-item" style="margin-top: 10px;">
+            <span class="admin-modal-item-label">Additional Information</span>
+            <div class="admin-detail-msg-box">${escapeHtml(req.additionalRequirements)}</div>
+          </div>
+        ` : ''}
+        ${req.referenceImage ? `
+          <div class="admin-modal-item" style="margin-top: 10px;">
+            <span class="admin-modal-item-label">Reference Image / Sketch</span>
+            <div class="admin-cust-ref-img-wrap">📎 ${escapeHtml(req.referenceImage)}</div>
+          </div>
+        ` : ''}
       </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Contact Number</span>
-        <span class="admin-detail-val"><a href="tel:${escapeHtml(req.contactNumber)}">${escapeHtml(req.contactNumber)}</a></span>
-      </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">Request Status</span>
-        <select class="admin-status-dropdown" onchange="updateCustomisationStatus('${req.id}', this.value)">
-          <option value="New Request" ${req.status === 'New Request' ? 'selected' : ''}>New Request</option>
-          <option value="In Review" ${req.status === 'In Review' ? 'selected' : ''}>In Review</option>
-          <option value="Quotation Sent" ${req.status === 'Quotation Sent' ? 'selected' : ''}>Quotation Sent</option>
-          <option value="Completed" ${req.status === 'Completed' ? 'selected' : ''}>Completed</option>
-        </select>
-      </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">🎨 Colour</span>
-        <span class="admin-detail-val">${escapeHtml(req.colour || 'Not specified')}</span>
-      </div>
-      <div class="admin-detail-block">
-        <span class="admin-detail-label">🧵 Fabric</span>
-        <span class="admin-detail-val">${escapeHtml(req.fabric || 'Not specified')}</span>
-      </div>
-      <div class="admin-detail-block admin-detail-full">
-        <span class="admin-detail-label">👗 Design</span>
-        <div class="admin-detail-msg-box">${escapeHtml(req.design || 'Not specified')}</div>
-      </div>
-      <div class="admin-detail-block admin-detail-full">
-        <span class="admin-detail-label">📐 Measurements</span>
-        <div class="admin-detail-msg-box">${escapeHtml(req.measurements || 'Not specified')}</div>
-      </div>
-      <div class="admin-detail-block admin-detail-full">
-        <span class="admin-detail-label">✨ Embellishments</span>
-        <div class="admin-detail-msg-box">${escapeHtml(req.embellishments || req.embellishment || 'Not specified')}</div>
-      </div>
-      <div class="admin-detail-block admin-detail-full">
-        <span class="admin-detail-label">Additional Information</span>
-        <div class="admin-detail-msg-box">${escapeHtml(req.additionalRequirements || 'None')}</div>
-      </div>
-      ${req.referenceImage ? `
-        <div class="admin-detail-block admin-detail-full">
-          <span class="admin-detail-label">Reference Image / Sketch</span>
-          <span class="admin-detail-val">📎 ${escapeHtml(req.referenceImage)}</span>
+
+      <!-- 3. ORDER WORKFLOW -->
+      ${isCompleted ? `
+        <div class="admin-modal-section admin-modal-sec-status">
+          <div class="admin-modal-sec-header">
+            <span class="admin-modal-sec-tag">03</span>
+            <h4 class="admin-modal-sec-title">ORDER WORKFLOW</h4>
+          </div>
+          ${req.orderCreated ? `
+            <div class="admin-order-created-alert">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              <div>
+                <div style="font-weight: 700; color: #1B6E36;">Order Created</div>
+                <div style="font-size: 13px; margin-top: 2px;">Associated: <strong>Order #${escapeHtml(req.orderNumber || '—')}</strong></div>
+              </div>
+            </div>
+          ` : `
+            <div class="admin-create-order-prompt">
+              <p style="margin: 0 0 10px 0; font-size: 13px; color: var(--charcoal); line-height: 1.4;">
+                Customisation work is marked as <strong>Completed</strong>. You can now create a customer order in the system.
+              </p>
+              <button type="button" class="btn-create-order-cta" onclick="handleCreateOrderFromCustomisation('${escapeHtml(req.id)}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                <span>Create Order</span>
+              </button>
+            </div>
+          `}
         </div>
       ` : ''}
     </div>
@@ -3726,6 +3916,7 @@ function showHelpDetailsModal(helpId) {
 
 let adminCustomMsgDebounce = {};
 let adminOrdersUnsubscribe = null;
+let adminCustomisationsUnsubscribe = null;
 
 window.handleAdminOrderStatusChange = async function(id, newStatus) {
   const orders = getAdminOrders();
@@ -3824,6 +4015,195 @@ window.handleAdminOrderCustomMsgChange = async function(id, customMsg) {
   }, 250);
 };
 
+window.handleAdminCustomisationStatusChange = async function(reqId, newStatus) {
+  const requests = getAdminCustomisations();
+  const req = requests.find(r => r.id === reqId);
+  if (!req) return;
+
+  req.status = newStatus;
+  saveAdminCustomisations(requests);
+
+  if (window.fbDb && window.fbFns) {
+    try {
+      const nowIso = new Date().toISOString();
+      await window.fbFns.updateDoc(
+        window.fbFns.doc(window.fbDb, 'customisationRequests', reqId),
+        {
+          status: newStatus,
+          updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso
+        }
+      );
+    } catch (err) {
+      console.warn('Firestore update customisation status error:', err);
+    }
+  }
+
+  // Refresh customisation view
+  renderAdminCustomisation();
+
+  // If modal is open for this request, refresh it
+  const modal = document.getElementById('adminModalOverlay');
+  if (modal && modal.style.display !== 'none') {
+    showCustomisationDetailsModal(reqId);
+  }
+};
+
+const activeOrderCreationLocks = new Set();
+
+window.handleCreateOrderFromCustomisation = async function(reqId) {
+  if (activeOrderCreationLocks.has(reqId)) return;
+  activeOrderCreationLocks.add(reqId);
+
+  try {
+    const requests = getAdminCustomisations();
+    const req = requests.find(r => r.id === reqId);
+    if (!req) return;
+
+    if (req.orderCreated || req.orderNumber) {
+      alert(`An order has already been created for this request (Order #${req.orderNumber}).`);
+      return;
+    }
+
+    // Generate unique 4-digit order number
+    const existingOrders = getAdminOrders();
+    const existingNums = new Set(existingOrders.map(o => getDisplayOrderNumber(o)));
+    let displayOrderNum = '';
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const candidate = String(Math.floor(1000 + Math.random() * 9000));
+      if (!existingNums.has(candidate)) {
+        displayOrderNum = candidate;
+        break;
+      }
+    }
+    if (!displayOrderNum) {
+      displayOrderNum = String(Math.floor(1000 + Math.random() * 9000));
+    }
+
+    const orderDateObj = new Date();
+    const dynamicDelivery = formatDynamicDeliveryDateRange(req.pinCode || '600001', req.state || 'Tamil Nadu', orderDateObj);
+    const amount = req.amount || req.price || '₹1,999';
+    const customerEmail = req.email || req.customerEmail || '';
+    let customerUid = req.userId || '';
+    if (!customerUid || customerUid === 'guest') {
+      const sess = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
+      if (sess && sess.uid && sess.provider !== 'guest') {
+        if (!customerEmail || (sess.email && sess.email.toLowerCase() === customerEmail.toLowerCase())) {
+          customerUid = sess.uid;
+        }
+      }
+    }
+    if (!customerUid) {
+      customerUid = window.fbAuth?.currentUser?.uid || 'guest';
+    }
+
+    const customerName = req.fullName || 'Valued Customer';
+    const contactNumber = req.contactNumber || '—';
+    const productName = req.design ? `Customised Outfit — ${req.design}` : 'Customised Bespoke Outfit';
+    const size = req.measurements && req.measurements !== 'Not specified' ? req.measurements : 'Custom Fit';
+
+    const orderPayload = {
+      userId: customerUid,
+      customerName: customerName,
+      customerEmail: customerEmail,
+      email: customerEmail,
+      contactNumber: contactNumber,
+      phone: contactNumber,
+      customerPhone: contactNumber,
+      product: productName,
+      productName: productName,
+      size: size,
+      quantity: 1,
+      amount: amount,
+      price: amount,
+      orderDate: formatOrderDisplayDate(orderDateObj),
+      date: formatOrderDisplayDate(orderDateObj),
+      createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : orderDateObj.toISOString(),
+      orderTimestamp: Date.now(),
+      expectedDelivery: dynamicDelivery,
+      estimatedDelivery: dynamicDelivery,
+      deliveryAddress: req.address || req.deliveryAddress || (contactNumber !== '—' ? `Contact: ${contactNumber}` : 'Bespoke Order Address'),
+      address: req.address || req.deliveryAddress || (contactNumber !== '—' ? `Contact: ${contactNumber}` : 'Bespoke Order Address'),
+      paymentMethod: 'Custom Order (Offline/Bespoke)',
+      paymentInfo: 'Custom Order (Offline/Bespoke)',
+      orderStatus: 'Processing',
+      status: 'Processing',
+      statusMessage: '',
+      customMessage: '',
+      orderNumber: displayOrderNum,
+      displayOrderNumber: displayOrderNum,
+      customisationRequestId: req.id,
+      isCustomOrder: true,
+      customisationDetails: {
+        colour: req.colour,
+        fabric: req.fabric,
+        design: req.design,
+        measurements: req.measurements,
+        embellishments: req.embellishments || req.embellishment
+      }
+    };
+
+    let createdDocId = 'ORD-' + displayOrderNum;
+    if (window.fbDb && window.fbFns) {
+      try {
+        const docRef = await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'orders'), orderPayload);
+        createdDocId = docRef.id;
+      } catch (fsErr) {
+        console.warn('Firestore addDoc order error:', fsErr);
+      }
+    }
+    orderPayload.id = createdDocId;
+    orderPayload.orderId = createdDocId;
+
+    // Mark customisation request as orderCreated
+    req.orderCreated = true;
+    req.orderId = createdDocId;
+    req.orderNumber = displayOrderNum;
+    saveAdminCustomisations(requests);
+
+    if (window.fbDb && window.fbFns) {
+      try {
+        await window.fbFns.updateDoc(
+          window.fbFns.doc(window.fbDb, 'customisationRequests', req.id),
+          {
+            orderCreated: true,
+            orderId: createdDocId,
+            orderNumber: displayOrderNum,
+            updatedAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
+          }
+        );
+      } catch (upErr) {
+        console.warn('Firestore update customisationRequest error:', upErr);
+      }
+    }
+
+    // Prepend new order to Admin orders
+    const adminOrders = getAdminOrders();
+    adminOrders.unshift(orderPayload);
+    saveAdminOrders(adminOrders);
+
+    // If customer is currently viewing My Orders in the same session, update live
+    const sess = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
+    if (sess && (sess.uid === customerUid || (sess.email && customerEmail && sess.email.toLowerCase() === customerEmail.toLowerCase()))) {
+      currentCustomerOrders.unshift(orderPayload);
+      renderCustomerOrdersList(currentCustomerOrders);
+    }
+
+    // Re-render admin views
+    renderAdminOrders();
+    renderAdminCustomisation();
+
+    // If modal is open, refresh it
+    const modal = document.getElementById('adminModalOverlay');
+    if (modal && modal.style.display !== 'none') {
+      showCustomisationDetailsModal(req.id);
+    }
+
+    alert(`Order Created\nOrder #${displayOrderNum}`);
+  } finally {
+    activeOrderCreationLocks.delete(reqId);
+  }
+};
+
 window.updateOrderStatus = window.handleAdminOrderStatusChange;
 
 function setupAdminOrdersListener() {
@@ -3843,27 +4223,38 @@ function setupAdminOrdersListener() {
             id: data.orderId || d.id,
             orderId: data.orderId || d.id,
             orderNumber: data.orderNumber || null,
+            displayOrderNumber: data.displayOrderNumber || data.orderNumber || null,
             userId: data.userId || '',
-            date: data.date || 'Recent',
+            date: data.orderDate || data.date || 'Recent',
+            orderDate: data.orderDate || data.date || 'Recent',
             createdAt: data.createdAt || null,
+            orderTimestamp: data.orderTimestamp || null,
             customerName: data.customerName || (data.customerEmail ? data.customerEmail.split('@')[0] : 'Customer'),
-            customerEmail: data.customerEmail || '',
-            customerPhone: data.customerPhone || '—',
+            customerEmail: data.customerEmail || data.email || '',
+            email: data.email || data.customerEmail || '',
+            customerPhone: data.customerPhone || data.phone || data.contactNumber || '—',
+            phone: data.customerPhone || data.phone || data.contactNumber || '—',
             product: data.productName || data.product || 'Designer Outfit',
+            productName: data.productName || data.product || 'Designer Outfit',
             size: data.size || 'Standard',
             quantity: data.quantity || 1,
             amount: data.amount || data.price || '₹0',
             price: data.price || data.amount || '₹0',
             status: data.orderStatus || data.status || 'Processing',
             orderStatus: data.orderStatus || data.status || 'Processing',
-            customMessage: data.customMessage || '',
+            customMessage: data.customMessage || data.statusMessage || '',
+            statusMessage: data.statusMessage || data.customMessage || '',
             paymentMethod: data.paymentMethod || 'Online',
-            address: data.address || data.fullAddress || '—',
-            estimatedDelivery: data.estimatedDelivery || '',
+            address: data.deliveryAddress || data.address || data.fullAddress || '—',
+            deliveryAddress: data.deliveryAddress || data.address || data.fullAddress || '—',
+            expectedDelivery: data.expectedDelivery || data.estimatedDelivery || '',
+            estimatedDelivery: data.estimatedDelivery || data.expectedDelivery || '',
             state: data.state || '',
             pinCode: data.pinCode || '',
             cancelledBy: data.cancelledBy || '',
-            cancelledAt: data.cancelledAt || null
+            cancelledAt: data.cancelledAt || null,
+            customisationRequestId: data.customisationRequestId || null,
+            isCustomOrder: Boolean(data.isCustomOrder || data.customisationRequestId)
           });
         });
         fbOrders.sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
@@ -3885,6 +4276,56 @@ function setupAdminOrdersListener() {
   }
 }
 
+function setupAdminCustomisationsListener() {
+  if (!window.fbDb || !window.fbFns) return;
+  if (adminCustomisationsUnsubscribe) {
+    try { adminCustomisationsUnsubscribe(); } catch (e) {}
+    adminCustomisationsUnsubscribe = null;
+  }
+  try {
+    adminCustomisationsUnsubscribe = window.fbFns.onSnapshot(
+      window.fbFns.collection(window.fbDb, 'customisationRequests'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const fbCust = [];
+          snapshot.forEach(d => {
+            const data = d.data();
+            fbCust.push({
+              id: d.id,
+              fullName: data.fullName || data['Full Name'] || 'Valued Customer',
+              contactNumber: data.contactNumber || data['Contact Number'] || '—',
+              colour: data.colour || data['Colour'] || 'Not specified',
+              fabric: data.fabric || data['Fabric'] || 'Not specified',
+              design: data.design || data['Design'] || 'Not specified',
+              measurements: data.measurements || data['Measurements'] || 'Not specified',
+              embellishments: data.embellishments || data['Embellishments'] || data.embellishment || 'Not specified',
+              additionalRequirements: data.additionalRequirements || data.additionalInformation || data['Additional Information'] || 'None',
+              referenceImage: data.referenceImage || '',
+              submissionDate: data.submissionDate || 'Recent',
+              status: data.status || 'New Request',
+              userId: data.userId || '',
+              email: data.email || '',
+              createdAt: data.createdAt || null,
+              orderCreated: Boolean(data.orderCreated),
+              orderId: data.orderId || null,
+              orderNumber: data.orderNumber || null
+            });
+          });
+          saveAdminCustomisations(fbCust);
+          if (currentAdminTab === 'customisation') {
+            renderAdminCustomisation();
+          }
+        }
+      },
+      (err) => {
+        console.warn('Admin customisations listener error:', err);
+      }
+    );
+  } catch (err) {
+    console.warn('setupAdminCustomisationsListener error:', err);
+  }
+}
+
 async function loadAdminDataFromFirestore() {
   if (!window.fbDb || !window.fbFns) return;
   try {
@@ -3897,27 +4338,38 @@ async function loadAdminDataFromFirestore() {
           id: data.orderId || d.id,
           orderId: data.orderId || d.id,
           orderNumber: data.orderNumber || null,
+          displayOrderNumber: data.displayOrderNumber || data.orderNumber || null,
           userId: data.userId || '',
-          date: data.date || 'Recent',
+          date: data.orderDate || data.date || 'Recent',
+          orderDate: data.orderDate || data.date || 'Recent',
           createdAt: data.createdAt || null,
+          orderTimestamp: data.orderTimestamp || null,
           customerName: data.customerName || (data.customerEmail ? data.customerEmail.split('@')[0] : 'Customer'),
-          customerEmail: data.customerEmail || '',
-          customerPhone: data.customerPhone || '—',
+          customerEmail: data.customerEmail || data.email || '',
+          email: data.email || data.customerEmail || '',
+          customerPhone: data.customerPhone || data.phone || data.contactNumber || '—',
+          phone: data.customerPhone || data.phone || data.contactNumber || '—',
           product: data.productName || data.product || 'Designer Outfit',
+          productName: data.productName || data.product || 'Designer Outfit',
           size: data.size || 'Standard',
           quantity: data.quantity || 1,
           amount: data.amount || data.price || '₹0',
           price: data.price || data.amount || '₹0',
           status: data.orderStatus || data.status || 'Processing',
           orderStatus: data.orderStatus || data.status || 'Processing',
-          customMessage: data.customMessage || '',
+          customMessage: data.customMessage || data.statusMessage || '',
+          statusMessage: data.statusMessage || data.customMessage || '',
           paymentMethod: data.paymentMethod || 'Online',
-          address: data.address || data.fullAddress || '—',
-          estimatedDelivery: data.estimatedDelivery || '',
+          address: data.deliveryAddress || data.address || data.fullAddress || '—',
+          deliveryAddress: data.deliveryAddress || data.address || data.fullAddress || '—',
+          expectedDelivery: data.expectedDelivery || data.estimatedDelivery || '',
+          estimatedDelivery: data.estimatedDelivery || data.expectedDelivery || '',
           state: data.state || '',
           pinCode: data.pinCode || '',
           cancelledBy: data.cancelledBy || '',
-          cancelledAt: data.cancelledAt || null
+          cancelledAt: data.cancelledAt || null,
+          customisationRequestId: data.customisationRequestId || null,
+          isCustomOrder: Boolean(data.isCustomOrder || data.customisationRequestId)
         });
       });
       fbOrders.sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
@@ -3936,17 +4388,23 @@ async function loadAdminDataFromFirestore() {
         const data = d.data();
         fbCust.push({
           id: d.id,
-          fullName: data.fullName || 'Valued Customer',
-          contactNumber: data.contactNumber || '—',
-          colour: data.colour || 'Not specified',
-          fabric: data.fabric || 'Not specified',
-          design: data.design || 'Not specified',
-          measurements: data.measurements || 'Not specified',
-          embellishments: data.embellishments || 'Not specified',
-          additionalRequirements: data.additionalRequirements || 'None',
+          fullName: data.fullName || data['Full Name'] || 'Valued Customer',
+          contactNumber: data.contactNumber || data['Contact Number'] || '—',
+          colour: data.colour || data['Colour'] || 'Not specified',
+          fabric: data.fabric || data['Fabric'] || 'Not specified',
+          design: data.design || data['Design'] || 'Not specified',
+          measurements: data.measurements || data['Measurements'] || 'Not specified',
+          embellishments: data.embellishments || data['Embellishments'] || data.embellishment || 'Not specified',
+          additionalRequirements: data.additionalRequirements || data.additionalInformation || data['Additional Information'] || 'None',
           referenceImage: data.referenceImage || '',
           submissionDate: data.submissionDate || 'Recent',
-          status: data.status || 'New Request'
+          status: data.status || 'New Request',
+          userId: data.userId || '',
+          email: data.email || '',
+          createdAt: data.createdAt || null,
+          orderCreated: Boolean(data.orderCreated),
+          orderId: data.orderId || null,
+          orderNumber: data.orderNumber || null
         });
       });
       saveAdminCustomisations(fbCust);
@@ -4008,6 +4466,9 @@ document.getElementById('adminTabHelp')?.addEventListener('click', () => switchA
 document.getElementById('adminModalCloseBtn')?.addEventListener('click', closeAdminModal);
 document.getElementById('adminModalOverlay')?.addEventListener('click', (e) => {
   if (e.target.id === 'adminModalOverlay') closeAdminModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeAdminModal();
 });
 
 // Card Action Delegation
