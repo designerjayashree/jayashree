@@ -195,6 +195,63 @@ button {
   color: #241A12;
 }
 
+.nav-auth-logged-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-auth-logged-in {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-auth-btn.is-authenticated {
+  padding: 6px 14px 6px 16px;
+}
+
+.nav-profile-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #4A382A;
+  color: #FAF7F2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(74, 56, 42, 0.15);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.nav-auth-btn:hover .nav-profile-avatar {
+  transform: scale(1.06);
+  background: #241A12;
+  box-shadow: 0 2px 6px rgba(74, 56, 42, 0.25);
+}
+
+.nav-profile-avatar img,
+.nav-profile-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.nav-profile-initial {
+  display: block;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
 .nav-user-icon {
   width: 16px;
   height: 16px;

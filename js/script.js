@@ -1777,18 +1777,48 @@ function clearCustomerSession() {
 
 function updateAuthUI() {
   const customer = getCustomerSession();
+  const openAuthBtn = document.getElementById('openAuthBtn');
+  const loggedOutView = document.getElementById('navAuthLoggedOut');
+  const loggedInView = document.getElementById('navAuthLoggedIn');
+  const navAvatar = document.getElementById('navProfileAvatar');
   const label = document.querySelector('.auth-btn-label');
   const mobileLabel = document.querySelector('.mobile-auth-label');
 
-  if (customer && customer.email) {
-    if (label) label.textContent = 'Login';
-    if (mobileLabel) mobileLabel.textContent = 'Login';
-    if (authUserEmail) authUserEmail.textContent = customer.email;
-    if (authUserInitials) {
-      const initial = (customer.name || customer.email || 'J').charAt(0).toUpperCase();
-      authUserInitials.textContent = initial;
+  const isAuthenticated = Boolean(customer && customer.email && customer.provider !== 'guest');
+
+  if (isAuthenticated) {
+    const displayName = customer.name || (customer.email ? customer.email.split('@')[0] : 'Customer');
+    const initial = (customer.name || customer.email || 'J').charAt(0).toUpperCase();
+
+    // Replace "Login" button with user's profile icon/avatar in navbar
+    if (loggedOutView) loggedOutView.style.display = 'none';
+    if (loggedInView) loggedInView.style.display = 'inline-flex';
+    if (openAuthBtn) {
+      openAuthBtn.classList.add('is-authenticated');
+      openAuthBtn.setAttribute('aria-label', `Account: ${displayName}`);
+      openAuthBtn.setAttribute('title', `Account: ${displayName}`);
     }
+
+    if (navAvatar) {
+      if (customer.photoURL) {
+        navAvatar.innerHTML = `<img src="${customer.photoURL}" alt="${displayName}" class="nav-profile-img">`;
+      } else {
+        navAvatar.innerHTML = `<span class="nav-profile-initial" id="navProfileInitial">${initial}</span>`;
+      }
+    }
+
+    if (mobileLabel) mobileLabel.textContent = 'Account';
+    if (authUserEmail) authUserEmail.textContent = customer.email;
+    if (authUserInitials) authUserInitials.textContent = initial;
   } else {
+    // When user logs out, change it back to "Login"
+    if (loggedOutView) loggedOutView.style.display = 'inline-flex';
+    if (loggedInView) loggedInView.style.display = 'none';
+    if (openAuthBtn) {
+      openAuthBtn.classList.remove('is-authenticated');
+      openAuthBtn.setAttribute('aria-label', 'Login');
+      openAuthBtn.removeAttribute('title');
+    }
     if (label) label.textContent = 'Login';
     if (mobileLabel) mobileLabel.textContent = 'Login / Sign Up';
   }
@@ -1998,6 +2028,7 @@ authSocialBtns.forEach(btn => {
         uid: user.uid,
         email: email,
         name: name,
+        photoURL: user.photoURL || '',
         provider: providerName.toLowerCase()
       });
 
@@ -2120,6 +2151,7 @@ if (authEmailForm) {
         uid: user?.uid || '',
         email: email,
         name: user?.displayName || email.split('@')[0],
+        photoURL: user?.photoURL || '',
         provider: 'email'
       });
 
@@ -2209,6 +2241,7 @@ if (window.fbAuth && window.fbFns && window.fbFns.getRedirectResult) {
         uid: user.uid,
         email: email,
         name: name,
+        photoURL: user.photoURL || '',
         provider: detectedProvider
       });
 
@@ -2250,6 +2283,7 @@ if (window.fbAuth && window.fbFns) {
         uid: user.uid,
         email: email,
         name: name,
+        photoURL: user.photoURL || '',
         provider: detectedProvider
       });
 
@@ -2341,6 +2375,8 @@ ensureStateOptions();
 });
 
 // Initialize customer authentication state on startup
+window.updateAuthUI = updateAuthUI;
+window.clearCustomerSession = clearCustomerSession;
 updateAuthUI();
 
 /* =========================================================
