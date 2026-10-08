@@ -53,16 +53,48 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
-    // Customisation Requests
+    // Customisation Requests & Customisations
     match /customisationRequests/{requestId} {
       allow create: if true;
-      allow read, update, delete: if isAdmin();
+      allow read: if isAdmin() || (
+        request.auth != null && (
+          resource.data.userId == request.auth.uid ||
+          resource.data.email == request.auth.token.email
+        )
+      );
+      allow update, delete: if isAdmin();
+    }
+    match /customisations/{requestId} {
+      allow create: if true;
+      allow read: if isAdmin() || (
+        request.auth != null && (
+          resource.data.userId == request.auth.uid ||
+          resource.data.email == request.auth.token.email
+        )
+      );
+      allow update, delete: if isAdmin();
     }
 
-    // Help Requests
+    // Help Requests & Help
     match /helpRequests/{helpId} {
       allow create: if true;
-      allow read, update, delete: if isAdmin();
+      allow read: if isAdmin() || (
+        request.auth != null && (
+          resource.data.userId == request.auth.uid ||
+          resource.data.email == request.auth.token.email
+        )
+      );
+      allow update, delete: if isAdmin();
+    }
+    match /help/{helpId} {
+      allow create: if true;
+      allow read: if isAdmin() || (
+        request.auth != null && (
+          resource.data.userId == request.auth.uid ||
+          resource.data.email == request.auth.token.email
+        )
+      );
+      allow update, delete: if isAdmin();
     }
 
     // Admin whitelist collection

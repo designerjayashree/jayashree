@@ -1488,18 +1488,46 @@ if (form) {
       return;
     }
 
+    const colour = (formData.get('colour') || '').trim();
+    const fabric = (formData.get('fabric') || '').trim();
+    const design = (formData.get('design') || '').trim();
+    const measurements = (formData.get('measurements') || '').trim();
+    const embellishments = (formData.get('embellishment') || '').trim();
+    const additionalInformation = (formData.get('requirements') || '').trim();
+
+    const customer = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
+    const authUser = window.fbAuth?.currentUser;
+    const userId = authUser?.uid || customer?.uid || '';
+    const email = authUser?.email || customer?.email || '';
+
     const payload = {
+      // Required customisation fields (standard keys)
       fullName,
       contactNumber,
-      colour: (formData.get('colour') || '').trim(),
-      fabric: (formData.get('fabric') || '').trim(),
-      design: (formData.get('design') || '').trim(),
-      measurements: (formData.get('measurements') || '').trim(),
-      embellishments: (formData.get('embellishment') || '').trim(),
-      additionalRequirements: (formData.get('requirements') || '').trim(),
-      referenceImage: '',
+      colour,
+      fabric,
+      design,
+      measurements,
+      embellishments,
+      additionalInformation,
+      additionalRequirements: additionalInformation,
+      userId,
+      email,
+      createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString(),
       status: 'New Request',
-      createdAt: null
+
+      // Exact prompt title-cased keys
+      'Full Name': fullName,
+      'Contact Number': contactNumber,
+      'Colour': colour,
+      'Fabric': fabric,
+      'Design': design,
+      'Measurements': measurements,
+      'Embellishments': embellishments,
+      'Additional Information': additionalInformation,
+
+      referenceImage: '',
+      submissionDate: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
     };
 
     const submitBtn = form.querySelector('.form-submit button');
@@ -1511,14 +1539,9 @@ if (form) {
 
     try {
       if (window.fbDb && window.fbFns) {
-        await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'customisationRequests'), {
-          ...payload,
-          createdAt: window.fbFns.serverTimestamp()
-        });
-        await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'enquiries'), {
-          ...payload,
-          createdAt: window.fbFns.serverTimestamp()
-        });
+        await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'customisationRequests'), payload);
+        await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'customisations'), payload);
+        await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'enquiries'), payload);
       }
       saveLocalCustomisation(payload);
       form.style.display = 'none';
@@ -1597,26 +1620,52 @@ if (helpForm && helpText) {
     if (helpValidation) {
       helpValidation.style.display = 'none';
     }
-    helpForm.style.display = 'none';
-    if (helpSuccess) {
-      helpSuccess.style.display = 'block';
+
+    const submitBtn = helpForm.querySelector('.help-submit-btn') || helpForm.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn ? submitBtn.innerHTML : 'Submit';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
     }
-    saveLocalHelp(val);
 
     const customer = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
+    const authUser = window.fbAuth?.currentUser;
+    const userId = authUser?.uid || customer?.uid || '';
+    const email = authUser?.email || customer?.email || '';
+
     const helpPayload = {
-      customerName: customer ? customer.name || 'Customer' : 'Website Customer',
-      email: customer ? customer.email || '—' : '—',
       message: val,
-      submissionDate: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ', ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      userId: userId,
+      email: email,
+      createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString(),
       status: 'Open',
-      createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
+
+      // Additional fields for admin compatibility
+      customerName: customer?.name || authUser?.displayName || (email ? email.split('@')[0] : 'Website Customer'),
+      submissionDate: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ', ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
-    if (window.fbDb && window.fbFns) {
-      try {
+
+    try {
+      if (window.fbDb && window.fbFns) {
         await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'helpRequests'), helpPayload);
-      } catch (err) {
-        console.warn('Firestore help request write error:', err);
+        await window.fbFns.addDoc(window.fbFns.collection(window.fbDb, 'help'), helpPayload);
+      }
+      saveLocalHelp(val);
+      helpForm.style.display = 'none';
+      if (helpSuccess) {
+        helpSuccess.style.display = 'block';
+      }
+    } catch (err) {
+      console.warn('Firestore help request write error:', err);
+      saveLocalHelp(val);
+      helpForm.style.display = 'none';
+      if (helpSuccess) {
+        helpSuccess.style.display = 'block';
+      }
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnText;
       }
     }
   });
