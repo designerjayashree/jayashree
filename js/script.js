@@ -2730,6 +2730,7 @@ window.getAdminOrders = getAdminOrders;
 window.saveAdminOrders = saveAdminOrders;
 window.showAdminDashboard = showAdminDashboard;
 window.renderAdminOrders = renderAdminOrders;
+window.showOrderDetailsModal = showOrderDetailsModal;
 window.loadAdminDataFromFirestore = loadAdminDataFromFirestore;
 updateAuthUI();
 
