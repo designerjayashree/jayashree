@@ -53,27 +53,27 @@ const KIDS_SIZES = [
 
 const CATALOGUE_DATA = {
   women: {
-    defaultCat: 'kurtis',
+    defaultCat: Object.keys(WOMEN_CATEGORIES)[0], // 'co-ords' (Co-Ord Sets)
     catLabel: 'Women',
     categories: WOMEN_CATEGORIES
   },
   kids: {
-    defaultCat: 'girls-dresses',
+    defaultCat: Object.keys(KIDS_CATEGORIES)[0], // 'kids-casual' (Casual Wear)
     catLabel: 'Kids',
     categories: KIDS_CATEGORIES
   },
   bridal: {
-    defaultCat: 'bridal-lehengas',
+    defaultCat: Object.keys(BRIDAL_CATEGORIES)[0], // 'accessories' (Bridal Accessories)
     catLabel: 'Bridal',
     categories: BRIDAL_CATEGORIES
   },
   ethnic: {
-    defaultCat: 'saree-blouses',
+    defaultCat: Object.keys(ETHNIC_CATEGORIES)[0], // 'anarkalis' (Anarkalis)
     catLabel: 'Ethnic',
     categories: ETHNIC_CATEGORIES
   },
   western: {
-    defaultCat: 'western-dresses',
+    defaultCat: Object.keys(WESTERN_CATEGORIES)[0], // 'bodycon' (Bodycon Dresses)
     catLabel: 'Western',
     categories: WESTERN_CATEGORIES
   }
@@ -1012,6 +1012,28 @@ function handleSubcatClick(e) {
 
 document.addEventListener('click', handleSubcatClick);
 
+// Ensure opening a main category from nav, mobile menu, homepage, or footer ALWAYS starts with the FIRST subcategory
+document.addEventListener('click', (e) => {
+  const catLink = e.target.closest('a[href^="#/women"], a[href^="#/kids"], a[href^="#/bridal"], a[href^="#/ethnic"], a[href^="#/western"], a[data-link^="#/women"], a[data-link^="#/kids"], a[data-link^="#/bridal"], a[data-link^="#/ethnic"], a[data-link^="#/western"]');
+  if (catLink && !catLink.closest('.subcat-nav')) {
+    const href = catLink.getAttribute('href') || catLink.getAttribute('data-link') || '';
+    const rawPath = href.replace(/^#\/?/, '').split('?')[0];
+    const targetPageKey = rawPath.replace('/', '');
+    if (CATALOGUE_DATA[targetPageKey]) {
+      const firstSubcat = Object.keys(CATALOGUE_DATA[targetPageKey].categories)[0];
+      const targetHash = `#/${targetPageKey}?category=${encodeURIComponent(firstSubcat)}`;
+      e.preventDefault();
+      if (location.hash === targetHash) {
+        renderSubcatNav(targetPageKey, firstSubcat);
+        renderCategory(targetPageKey, firstSubcat);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        location.hash = targetHash;
+      }
+    }
+  }
+});
+
 /* =========================================================
    CUSTOMISATION PAGE HELPERS
    ========================================================= */
@@ -1676,11 +1698,18 @@ popupCats.forEach(cat => {
     sessionStorage.setItem('viewCollectionOriginRoute', '#/');
 
     closeCollectionPopup(true);
-    if (window.location.hash === targetRoute) {
-      navigate();
+    const targetPageKey = targetRoute.replace(/^#\/?/, '').split('?')[0];
+    if (CATALOGUE_DATA[targetPageKey]) {
+      const firstSubcat = Object.keys(CATALOGUE_DATA[targetPageKey].categories)[0];
+      const targetHash = `#/${targetPageKey}?category=${encodeURIComponent(firstSubcat)}`;
+      if (window.location.hash === targetHash) {
+        renderSubcatNav(targetPageKey, firstSubcat);
+        renderCategory(targetPageKey, firstSubcat);
+      } else {
+        window.location.hash = targetHash;
+      }
     } else {
       window.location.hash = targetRoute;
-      navigate();
     }
   });
 });
