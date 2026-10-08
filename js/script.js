@@ -2441,9 +2441,11 @@ function renderCustomerOrdersList(orders) {
       const isCancelledByAdmin = (order.cancelledBy || '').toLowerCase().trim() === 'admin';
       const label = isCancelledByAdmin ? 'Cancelled by Jayashree' : 'Cancelled by you';
       footerHtml = `
-        <div class="my-order-cancelled-notice">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-          <span>${escapeHtml(label)}</span>
+        <div class="my-order-cancel-wrap">
+          <div class="my-order-cancelled-notice">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            <span>${escapeHtml(label)}</span>
+          </div>
         </div>
       `;
     } else if (isDelivered) {
@@ -2578,14 +2580,10 @@ function renderCustomerOrdersList(orders) {
         <div class="my-order-card-separator"></div>
 
         <div class="my-order-bottom-section">
-          ${!isCancelled ? `
-            <div class="my-order-delivery-item">
-              <span class="my-order-date-label">Estimated Delivery:</span>
-              <span class="my-order-date-val my-order-delivery-val">${escapeHtml(expectedDeliveryFormatted)}</span>
-            </div>
-          ` : `
-            <div class="my-order-delivery-placeholder" aria-hidden="true"></div>
-          `}
+          <div class="my-order-delivery-item">
+            <span class="my-order-date-label">Estimated Delivery:</span>
+            <span class="my-order-date-val my-order-delivery-val">${escapeHtml(expectedDeliveryFormatted)}</span>
+          </div>
         </div>
 
         ${isCustom && customisationDetailsHtml ? customisationDetailsHtml : ''}
