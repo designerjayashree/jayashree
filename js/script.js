@@ -1686,7 +1686,7 @@ if (helpForm && helpText) {
       userId: userId,
       email: email,
       createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString(),
-      status: 'Open',
+      status: 'Not Resolved',
 
       // Additional fields for admin compatibility
       customerName: customer?.name || authUser?.displayName || (email ? email.split('@')[0] : 'Website Customer'),
@@ -3170,6 +3170,18 @@ const DEFAULT_ADMIN_CUSTOMISATIONS = [
   }
 ];
 
+const HELP_STATUS_OPTIONS = ['Not Resolved', 'In Progress', 'Resolved'];
+window.HELP_STATUS_OPTIONS = HELP_STATUS_OPTIONS;
+
+function normalizeHelpStatus(status) {
+  if (!status) return 'Not Resolved';
+  const s = String(status).trim().toLowerCase();
+  if (s === 'resolved' || s === 'completed') return 'Resolved';
+  if (s === 'in progress' || s === 'in-progress' || s === 'inreview' || s === 'in review') return 'In Progress';
+  return 'Not Resolved';
+}
+window.normalizeHelpStatus = normalizeHelpStatus;
+
 const DEFAULT_ADMIN_HELP = [
   {
     id: 'HELP-201',
@@ -3177,7 +3189,7 @@ const DEFAULT_ADMIN_HELP = [
     email: 'sneha.pillai@example.com',
     message: 'Hello, I placed an enquiry for custom bridal wear 2 days ago. Could you please confirm if you have availability for a fitting appointment in Chennai this weekend?',
     submissionDate: '29 Sep 2026, 11:30 AM',
-    status: 'Pending Reply'
+    status: 'Not Resolved'
   },
   {
     id: 'HELP-200',
@@ -3185,7 +3197,7 @@ const DEFAULT_ADMIN_HELP = [
     email: 'rajesh.g@example.com',
     message: 'Hi team, I would like to know if international shipping to Dubai is available for ready-to-wear kurtas, and how many days it typically takes.',
     submissionDate: '27 Sep 2026, 04:15 PM',
-    status: 'Resolved'
+    status: 'In Progress'
   },
   {
     id: 'HELP-199',
@@ -3250,7 +3262,21 @@ function saveLocalCustomisation(payload) {
 function getAdminHelp() {
   try {
     const saved = localStorage.getItem('jayashree_help_store');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      let changed = false;
+      parsed.forEach(q => {
+        const norm = normalizeHelpStatus(q.status);
+        if (q.status !== norm) {
+          q.status = norm;
+          changed = true;
+        }
+      });
+      if (changed) {
+        localStorage.setItem('jayashree_help_store', JSON.stringify(parsed));
+      }
+      return parsed;
+    }
   } catch (e) {}
   localStorage.setItem('jayashree_help_store', JSON.stringify(DEFAULT_ADMIN_HELP));
   return DEFAULT_ADMIN_HELP;
@@ -3271,7 +3297,7 @@ function saveLocalHelp(msg) {
     email: customer ? customer.email || '—' : '—',
     message: msg,
     submissionDate: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ', ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    status: 'Pending Reply'
+    status: 'Not Resolved'
   };
   list.unshift(newItem);
   saveAdminHelp(list);
@@ -3295,17 +3321,26 @@ function handleAdminRoute() {
     } else {
       currentAdminTab = 'orders';
     }
+
+    if (hash.includes('filter=not-resolved')) {
+      currentHelpFilter = 'Not Resolved';
+    } else if (hash.includes('filter=in-progress')) {
+      currentHelpFilter = 'In Progress';
+    } else if (hash.includes('filter=resolved')) {
+      currentHelpFilter = 'Resolved';
+    }
+
     showAdminDashboard();
+
     if (hash.includes('modal=order')) {
-      setTimeout(() => {
-        const orders = getAdminOrders();
-        if (orders.length > 0) showOrderDetailsModal(orders[0].id);
-      }, 120);
+      const orders = getAdminOrders();
+      if (orders.length > 0) showOrderDetailsModal(orders[0].id);
     } else if (hash.includes('modal=customisation')) {
-      setTimeout(() => {
-        const reqs = getAdminCustomisations();
-        if (reqs.length > 0) showCustomisationDetailsModal(reqs[0].id);
-      }, 120);
+      const reqs = getAdminCustomisations();
+      if (reqs.length > 0) showCustomisationDetailsModal(reqs[0].id);
+    } else if (hash.includes('modal=help')) {
+      const queries = getAdminHelp();
+      if (queries.length > 0) showHelpDetailsModal(queries[0].id);
     }
   } else {
     showAdminLogin();
@@ -3601,12 +3636,23 @@ function renderAdminCustomisation() {
   `;
 }
 
+let currentHelpFilter = 'All';
+
+window.setAdminHelpFilter = function(filter) {
+  currentHelpFilter = filter;
+  renderAdminHelp();
+};
+
 function renderAdminHelp() {
   const container = document.getElementById('adminHelpContent');
   if (!container) return;
 
-  const queries = getAdminHelp();
-  if (queries.length === 0) {
+  const allQueries = getAdminHelp().map(q => {
+    q.status = normalizeHelpStatus(q.status);
+    return q;
+  });
+
+  if (allQueries.length === 0) {
     container.innerHTML = `
       <div class="admin-section-header">
         <div class="admin-section-title">Help Centre Requests</div>
@@ -3617,29 +3663,66 @@ function renderAdminHelp() {
     return;
   }
 
+  const filterOptions = ['All', 'Not Resolved', 'In Progress', 'Resolved'];
+  const filteredQueries = currentHelpFilter === 'All'
+    ? allQueries
+    : allQueries.filter(q => q.status === currentHelpFilter);
+
   container.innerHTML = `
     <div class="admin-section-header">
       <div class="admin-section-title">Help Centre Requests</div>
-      <div class="admin-section-count">${queries.length} ${queries.length === 1 ? 'Query' : 'Queries'}</div>
+      <div class="admin-section-count">${allQueries.length} ${allQueries.length === 1 ? 'Query' : 'Queries'}</div>
     </div>
-    <div class="admin-card-list">
-      ${queries.map(q => `
-        <div class="admin-item-card">
-          <div class="admin-card-top">
-            <div class="admin-card-header-left">
-              <div class="admin-card-person-name">${escapeHtml(q.customerName || 'Customer')}</div>
-              <div class="admin-card-contact-sub">${escapeHtml(q.email || 'No email provided')}</div>
-            </div>
-            <span class="admin-status-pill admin-status-${q.status === 'Resolved' ? 'resolved' : 'pending'}">${escapeHtml(q.status)}</span>
-          </div>
-          <div class="admin-message-preview">${escapeHtml(q.message)}</div>
-          <div class="admin-card-bottom">
-            <span class="admin-card-date">Submitted: ${escapeHtml(q.submissionDate)} • ${escapeHtml(q.id)}</span>
-            <button type="button" class="admin-view-btn" data-action="view-help" data-id="${q.id}">Read Full Message</button>
-          </div>
-        </div>
+
+    <!-- Status Filter Bar -->
+    <div class="admin-help-filter-bar" role="group" aria-label="Filter Help Requests by Status">
+      ${filterOptions.map(opt => `
+        <button type="button"
+          class="admin-help-filter-btn ${currentHelpFilter === opt ? 'active' : ''}"
+          onclick="setAdminHelpFilter('${opt}')"
+          data-filter="${opt}">
+          ${opt}
+        </button>
       `).join('')}
     </div>
+
+    ${filteredQueries.length === 0 ? `
+      <div class="admin-empty-filter-state">
+        <p style="text-align: center; color: var(--muted); padding: 36px 0;">No requests with status <strong>${escapeHtml(currentHelpFilter)}</strong>.</p>
+      </div>
+    ` : `
+      <div class="admin-card-list">
+        ${filteredQueries.map(q => {
+          const normStatus = normalizeHelpStatus(q.status);
+          const statusSlug = normStatus.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+          return `
+            <div class="admin-item-card">
+              <div class="admin-card-top">
+                <div class="admin-card-header-left">
+                  <div class="admin-card-person-name">${escapeHtml(q.customerName || 'Customer')}</div>
+                  <div class="admin-card-contact-sub">${escapeHtml(q.email || 'No email provided')}</div>
+                </div>
+                <div class="admin-help-status-wrapper">
+                  <select class="admin-status-pill admin-status-${statusSlug} admin-help-status-dropdown-card"
+                    data-id="${escapeHtml(q.id)}"
+                    onchange="updateHelpStatus('${escapeHtml(q.id)}', this.value)"
+                    title="Change request status">
+                    ${HELP_STATUS_OPTIONS.map(opt => `
+                      <option value="${opt}" ${normStatus === opt ? 'selected' : ''}>${opt}</option>
+                    `).join('')}
+                  </select>
+                </div>
+              </div>
+              <div class="admin-message-preview">${escapeHtml(q.message)}</div>
+              <div class="admin-card-bottom">
+                <span class="admin-card-date">Submitted: ${escapeHtml(q.submissionDate)} • ${escapeHtml(q.id)}</span>
+                <button type="button" class="admin-view-btn" data-action="view-help" data-id="${escapeHtml(q.id)}">Read Full Message</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
   `;
 }
 
@@ -3927,6 +4010,8 @@ function showHelpDetailsModal(helpId) {
   const q = queries.find(item => item.id === helpId);
   if (!q) return;
 
+  const status = normalizeHelpStatus(q.status);
+
   const content = `
     <div class="admin-detail-grid">
       <div class="admin-detail-block">
@@ -3943,9 +4028,10 @@ function showHelpDetailsModal(helpId) {
       </div>
       <div class="admin-detail-block">
         <span class="admin-detail-label">Status</span>
-        <select class="admin-status-dropdown" onchange="updateHelpStatus('${q.id}', this.value)">
-          <option value="Pending Reply" ${q.status === 'Pending Reply' ? 'selected' : ''}>Pending Reply</option>
-          <option value="Resolved" ${q.status === 'Resolved' ? 'selected' : ''}>Resolved</option>
+        <select class="admin-status-dropdown" onchange="updateHelpStatus('${escapeHtml(q.id)}', this.value)">
+          ${HELP_STATUS_OPTIONS.map(opt => `
+            <option value="${opt}" ${status === opt ? 'selected' : ''}>${opt}</option>
+          `).join('')}
         </select>
       </div>
       <div class="admin-detail-block admin-detail-full">
@@ -3956,6 +4042,41 @@ function showHelpDetailsModal(helpId) {
   `;
   openAdminModal(`Help Request • ${escapeHtml(q.customerName || 'Customer')}`, content);
 }
+
+window.updateHelpStatus = async function(id, newStatus) {
+  const normalized = normalizeHelpStatus(newStatus);
+  const queries = getAdminHelp();
+  const q = queries.find(item => item.id === id);
+  if (q) {
+    q.status = normalized;
+    saveAdminHelp(queries);
+  }
+
+  // Persist to Firestore
+  if (window.fbDb && window.fbFns) {
+    try {
+      const nowIso = new Date().toISOString();
+      await window.fbFns.updateDoc(
+        window.fbFns.doc(window.fbDb, 'helpRequests', id),
+        {
+          status: normalized,
+          updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso
+        }
+      );
+    } catch (err) {
+      console.warn('Firestore update help request status error:', err);
+    }
+  }
+
+  // Re-render Help tab
+  renderAdminHelp();
+
+  // If details modal is open for this request, refresh it
+  const modal = document.getElementById('adminModalOverlay');
+  if (modal && modal.style.display !== 'none') {
+    showHelpDetailsModal(id);
+  }
+};
 
 let adminCustomMsgDebounce = {};
 let adminOrdersUnsubscribe = null;
@@ -4469,7 +4590,7 @@ async function loadAdminDataFromFirestore() {
           email: data.email || '—',
           message: data.message || '',
           submissionDate: data.submissionDate || 'Recent',
-          status: data.status || 'Open'
+          status: normalizeHelpStatus(data.status || 'Not Resolved')
         });
       });
       saveAdminHelp(fbHelp);

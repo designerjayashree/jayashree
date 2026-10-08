@@ -3862,7 +3862,8 @@ body.menu-open {
 .admin-status-confirmed,
 .admin-status-new-request,
 .admin-status-new,
-.admin-status-pending {
+.admin-status-pending,
+.admin-status-not-resolved {
   background: #FEF3C7;
   color: #92400E;
 }
@@ -3875,6 +3876,76 @@ body.menu-open {
 .admin-status-other {
   background: #F1F5F9;
   color: #475569;
+}
+
+/* ==========================================
+   HELP CENTRE STATUS FILTER & CONTROLS
+   ========================================== */
+
+.admin-help-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.admin-help-filter-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  background: var(--white);
+  border: 1px solid var(--border);
+  color: #5C4D42;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.admin-help-filter-btn:hover {
+  background: #FAF7F2;
+  color: var(--espresso);
+  border-color: rgba(74, 56, 42, 0.25);
+}
+
+.admin-help-filter-btn.active {
+  background: #4A382A;
+  color: #FFFFFF;
+  border-color: #4A382A;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(74, 56, 42, 0.15);
+}
+
+.admin-help-status-wrapper {
+  display: inline-flex;
+  align-items: center;
+}
+
+.admin-help-status-dropdown-card {
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 4px 20px 4px 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='%236B5E55' d='M0 0l4 4 4-4z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: box-shadow 0.15s ease;
+}
+
+.admin-help-status-dropdown-card:focus {
+  box-shadow: 0 0 0 2px rgba(74, 56, 42, 0.15);
+}
+
+.admin-empty-filter-state {
+  background: #FAF7F2;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  margin: 12px 0 24px;
 }
 
 /* ==========================================
