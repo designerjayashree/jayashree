@@ -3814,7 +3814,8 @@ function renderAdminOrders() {
           ${orders.map(order => {
             const currentStatus = order.status || order.orderStatus || 'Processing';
             const isOther = currentStatus === 'Other';
-            const isCancelled = currentStatus === 'Cancelled';
+            const isCancelled = (currentStatus || '').toLowerCase() === 'cancelled';
+            const isCustomerCancelled = isCancelled && (order.cancelledBy || '').toLowerCase().trim() === 'customer';
             const customMsg = order.customMessage || '';
             const displayNum = getDisplayOrderNumber(order);
             const isCustom = Boolean(order.customisationRequestId || order.isCustomOrder);
@@ -3845,26 +3846,35 @@ function renderAdminOrders() {
                 </td>
                 <td class="admin-td-status">
                   <div class="admin-status-wrap">
-                    <select class="admin-order-status-select" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
-                      ${ORDER_STATUS_OPTIONS.map(opt => `
-                        <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
-                      `).join('')}
-                    </select>
-                    ${isCancelled ? `
+                    ${isCustomerCancelled ? `
+                      <span class="admin-status-static-badge">Cancelled</span>
                       <div class="admin-cancelled-details-block">
                         <div class="admin-cancelled-line">Status: <strong>Cancelled</strong></div>
-                        <div class="admin-cancelled-line">Cancelled by: <strong>${(order.cancelledBy || '').toLowerCase() === 'customer' ? 'Customer' : 'Admin'}</strong></div>
+                        <div class="admin-cancelled-line">Cancelled by: <strong>Customer</strong></div>
                         ${order.cancelledAt ? `<div class="admin-cancelled-line admin-cancelled-time">Cancelled at: <span>${escapeHtml(formatOrderDateTime(order.cancelledAt))}</span></div>` : ''}
                       </div>
-                    ` : ''}
-                    <div class="admin-custom-msg-wrap" id="adminCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block;' : 'display: none;'}">
-                      <input type="text" class="admin-custom-msg-input" id="adminCustomInput_${escapeHtml(order.id)}"
-                        placeholder="Custom message..."
-                        value="${escapeHtml(customMsg)}"
-                        oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
-                        onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
-                        onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
-                    </div>
+                    ` : `
+                      <select class="admin-order-status-select" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
+                        ${ORDER_STATUS_OPTIONS.map(opt => `
+                          <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
+                        `).join('')}
+                      </select>
+                      ${isCancelled ? `
+                        <div class="admin-cancelled-details-block">
+                          <div class="admin-cancelled-line">Status: <strong>Cancelled</strong></div>
+                          <div class="admin-cancelled-line">Cancelled by: <strong>${(order.cancelledBy || '').toLowerCase() === 'customer' ? 'Customer' : 'Admin'}</strong></div>
+                          ${order.cancelledAt ? `<div class="admin-cancelled-line admin-cancelled-time">Cancelled at: <span>${escapeHtml(formatOrderDateTime(order.cancelledAt))}</span></div>` : ''}
+                        </div>
+                      ` : ''}
+                      <div class="admin-custom-msg-wrap" id="adminCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block;' : 'display: none;'}">
+                        <input type="text" class="admin-custom-msg-input" id="adminCustomInput_${escapeHtml(order.id)}"
+                          placeholder="Custom message..."
+                          value="${escapeHtml(customMsg)}"
+                          oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+                          onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+                          onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
+                      </div>
+                    `}
                   </div>
                 </td>
                 <td class="admin-td-action">
@@ -3907,16 +3917,14 @@ function renderAdminCustomisation() {
       ${requests.map(req => {
         const currentStatus = req.status || 'New Request';
         const isCompleted = currentStatus === 'Completed';
-        const statusSlug = currentStatus.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const colourFabric = [req.colour, req.fabric].filter(Boolean).join(' · ');
+        const embellishments = req.embellishments || req.embellishment || '';
         return `
           <div class="admin-cust-card" data-req-id="${escapeHtml(req.id)}">
-            <div class="admin-card-header-bar">
-              <div class="admin-card-header-main">
-                <span class="admin-card-sub-tag">REQUEST #${escapeHtml(req.id)}</span>
-                <h3 class="admin-card-person-name">${escapeHtml(req.fullName)}</h3>
-              </div>
-              <div class="admin-card-status-control">
-                <label class="admin-ctrl-label">Status</label>
+            <div class="admin-cust-card-header">
+              <span class="admin-cust-tag">REQUEST #${escapeHtml(req.id)}</span>
+              <div class="admin-cust-status-wrap">
+                <span class="admin-cust-status-label">STATUS</span>
                 <select class="admin-cust-status-dropdown" onchange="handleAdminCustomisationStatusChange('${escapeHtml(req.id)}', this.value)">
                   ${CUSTOMISATION_STATUS_OPTIONS.map(opt => `
                     <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
@@ -3925,87 +3933,66 @@ function renderAdminCustomisation() {
               </div>
             </div>
 
-            <div class="admin-cust-sections-wrap">
-              <!-- CUSTOMER SECTION -->
-              <div class="admin-cust-subpanel">
-                <div class="admin-cust-sec-title">CUSTOMER</div>
-                <div class="admin-cust-grid-2">
-                  <div class="admin-cust-field">
-                    <span class="admin-cust-label">Full Name</span>
-                    <span class="admin-cust-val"><strong>${escapeHtml(req.fullName)}</strong></span>
-                  </div>
-                  <div class="admin-cust-field">
-                    <span class="admin-cust-label">Contact Number</span>
-                    <span class="admin-cust-val"><a href="tel:${escapeHtml(req.contactNumber)}">${escapeHtml(req.contactNumber)}</a></span>
-                  </div>
-                  <div class="admin-cust-field">
-                    <span class="admin-cust-label">Submission Date</span>
-                    <span class="admin-cust-val">${escapeHtml(req.submissionDate || 'Recent')}</span>
-                  </div>
-                  <div class="admin-cust-field">
-                    <span class="admin-cust-label">Request Status</span>
-                    <div><span class="admin-status-pill admin-status-${statusSlug}">${escapeHtml(currentStatus)}</span></div>
-                  </div>
+            <div class="admin-cust-card-body">
+              <div class="admin-cust-person-block">
+                <h3 class="admin-cust-person-name">${escapeHtml(req.fullName)}</h3>
+                <div class="admin-cust-meta-line">
+                  <a href="tel:${escapeHtml(req.contactNumber)}" class="admin-cust-phone">${escapeHtml(req.contactNumber)}</a>
+                  <span class="admin-cust-bullet">·</span>
+                  <span class="admin-cust-date">${escapeHtml(req.submissionDate || 'Recent')}</span>
                 </div>
               </div>
 
-              <!-- REQUEST SECTION -->
-              <div class="admin-cust-subpanel">
-                <div class="admin-cust-sec-title">REQUEST</div>
-                <div class="admin-cust-grid-specs">
-                  <div class="admin-cust-field">
-                    <span class="admin-cust-label">Colour</span>
-                    <span class="admin-cust-val">${escapeHtml(req.colour || 'Not specified')}</span>
-                  </div>
-                  <div class="admin-cust-field">
-                    <span class="admin-cust-label">Fabric</span>
-                    <span class="admin-cust-val">${escapeHtml(req.fabric || 'Not specified')}</span>
-                  </div>
-                  <div class="admin-cust-field">
-                    <span class="admin-cust-label">Measurements</span>
-                    <span class="admin-cust-val">${escapeHtml(req.measurements || 'Not specified')}</span>
-                  </div>
-                  <div class="admin-cust-field">
-                    <span class="admin-cust-label">Embellishments</span>
-                    <span class="admin-cust-val">${escapeHtml(req.embellishments || req.embellishment || 'Not specified')}</span>
-                  </div>
-                </div>
-                <div class="admin-cust-field-full">
-                  <span class="admin-cust-label">Design</span>
-                  <div class="admin-cust-text-box">${escapeHtml(req.design || 'Not specified')}</div>
-                </div>
+              <div class="admin-cust-content-block">
+                ${req.design ? `
+                  <div class="admin-cust-design-title">${escapeHtml(req.design)}</div>
+                ` : ''}
+
+                ${colourFabric ? `
+                  <div class="admin-cust-spec-line admin-cust-spec-colour-fabric">${escapeHtml(colourFabric)}</div>
+                ` : ''}
+
+                ${req.measurements ? `
+                  <div class="admin-cust-spec-line admin-cust-spec-measurements">${escapeHtml(req.measurements)}</div>
+                ` : ''}
+
+                ${embellishments ? `
+                  <div class="admin-cust-spec-line admin-cust-spec-embellishments">${escapeHtml(embellishments)}</div>
+                ` : ''}
+
                 ${(req.additionalRequirements && req.additionalRequirements !== 'None') ? `
-                  <div class="admin-cust-field-full">
-                    <span class="admin-cust-label">Additional Information</span>
-                    <div class="admin-cust-text-box">${escapeHtml(req.additionalRequirements)}</div>
+                  <div class="admin-cust-info-row">
+                    <span class="admin-cust-info-label">Additional information:</span>
+                    <span class="admin-cust-info-val">${escapeHtml(req.additionalRequirements)}</span>
                   </div>
                 ` : ''}
-                ${req.referenceImage ? `
-                  <div class="admin-cust-field-full">
-                    <span class="admin-cust-label">Reference Image / Sketch</span>
-                    <div class="admin-cust-ref-img-wrap">📎 ${escapeHtml(req.referenceImage)}</div>
-                  </div>
-                ` : ''}
-              </div>
-            </div>
 
-            <div class="admin-cust-card-footer">
-              <div class="admin-cust-order-action-area">
-                ${isCompleted ? (
-                  req.orderCreated ? `
-                    <div class="admin-order-created-badge">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                      <span>Order Created • <strong>Order #${escapeHtml(req.orderNumber || '—')}</strong></span>
-                    </div>
-                  ` : `
-                    <button type="button" class="btn-create-order-cta" onclick="handleCreateOrderFromCustomisation('${escapeHtml(req.id)}')">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                      <span>Create Order</span>
-                    </button>
-                  `
-                ) : ''}
+                ${req.referenceImage ? `
+                  <div class="admin-cust-info-row">
+                    <span class="admin-cust-info-label">Reference image:</span>
+                    <span class="admin-cust-info-val">📎 ${escapeHtml(req.referenceImage)}</span>
+                  </div>
+                ` : ''}
               </div>
-              <button type="button" class="admin-view-btn" data-action="view-customisation" data-id="${escapeHtml(req.id)}">View Complete Request</button>
+
+              <div class="admin-cust-card-actions">
+                <div class="admin-cust-order-action-area">
+                  ${isCompleted ? (
+                    req.orderCreated ? `
+                      <div class="admin-order-created-badge">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Order Created • <strong>Order #${escapeHtml(req.orderNumber || '—')}</strong></span>
+                      </div>
+                    ` : `
+                      <button type="button" class="btn-create-order-cta" onclick="handleCreateOrderFromCustomisation('${escapeHtml(req.id)}')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                        <span>Create Order</span>
+                      </button>
+                    `
+                  ) : ''}
+                </div>
+                <button type="button" class="admin-view-btn admin-cust-view-btn" data-action="view-customisation" data-id="${escapeHtml(req.id)}">View Complete Request</button>
+              </div>
             </div>
           </div>
         `;
@@ -4111,7 +4098,8 @@ function showOrderDetailsModal(orderId) {
 
   const currentStatus = order.status || order.orderStatus || 'Processing';
   const isOther = currentStatus === 'Other';
-  const isCancelled = currentStatus === 'Cancelled';
+  const isCancelled = (currentStatus || '').toLowerCase() === 'cancelled';
+  const isCustomerCancelled = isCancelled && (order.cancelledBy || '').toLowerCase().trim() === 'customer';
   const customMsg = order.customMessage || '';
   const displayNum = getDisplayOrderNumber(order);
   const displayDate = formatOrderDisplayDate(order);
@@ -4243,20 +4231,24 @@ function showOrderDetailsModal(orderId) {
         ` : ''}
         <div class="admin-status-control-box">
           <label class="admin-modal-item-label" style="display: block; margin-bottom: 6px;">Status</label>
-          <select class="admin-status-dropdown" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
-            ${ORDER_STATUS_OPTIONS.map(opt => `
-              <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
-            `).join('')}
-          </select>
-          <div class="admin-custom-msg-wrap" id="modalCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block; margin-top: 10px;' : 'display: none; margin-top: 10px;'}">
-            <label class="admin-modal-item-label" style="display: block; margin-bottom: 4px;">Admin Custom Message</label>
-            <input type="text" class="admin-custom-msg-input" id="modalCustomInput_${escapeHtml(order.id)}"
-              placeholder="Fabric not found — this may take some time to deliver the product."
-              value="${escapeHtml(customMsg)}"
-              oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
-              onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
-              onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
-          </div>
+          ${isCustomerCancelled ? `
+            <div><span class="admin-status-static-badge">Cancelled</span></div>
+          ` : `
+            <select class="admin-status-dropdown" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
+              ${ORDER_STATUS_OPTIONS.map(opt => `
+                <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
+              `).join('')}
+            </select>
+            <div class="admin-custom-msg-wrap" id="modalCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block; margin-top: 10px;' : 'display: none; margin-top: 10px;'}">
+              <label class="admin-modal-item-label" style="display: block; margin-bottom: 4px;">Admin Custom Message</label>
+              <input type="text" class="admin-custom-msg-input" id="modalCustomInput_${escapeHtml(order.id)}"
+                placeholder="Fabric not found — this may take some time to deliver the product."
+                value="${escapeHtml(customMsg)}"
+                oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+                onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+                onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
+            </div>
+          `}
         </div>
       </div>
     </div>
@@ -4463,6 +4455,10 @@ let adminCustomisationsUnsubscribe = null;
 window.handleAdminOrderStatusChange = async function(id, newStatus) {
   const orders = getAdminOrders();
   const order = orders.find(o => o.id === id);
+  if (order && (order.status || order.orderStatus || '').toLowerCase() === 'cancelled' && (order.cancelledBy || '').toLowerCase().trim() === 'customer') {
+    console.warn('Cannot change status of an order cancelled by customer');
+    return;
+  }
   if (order) {
     order.status = newStatus;
     order.orderStatus = newStatus;
