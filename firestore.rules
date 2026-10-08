@@ -41,9 +41,14 @@ service cloud.firestore {
       );
       allow update: if isAdmin() || (
         request.auth != null && 
-        resource.data.userId == request.auth.uid &&
+        (resource.data.userId == request.auth.uid || resource.data.customerEmail == request.auth.token.email) &&
         request.resource.data.status == 'Cancelled' &&
-        !(resource.data.status in ['Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'])
+        (request.resource.data.cancelledBy == 'customer' || request.resource.data.cancelledBy == 'Customer') &&
+        !(resource.data.status in ['Shipped', 'Out for Delivery', 'Delivered', 'Cancelled']) &&
+        (
+          !(resource.data.createdAt is timestamp) ||
+          request.time <= resource.data.createdAt + duration.value(24, 'h')
+        )
       );
       allow delete: if isAdmin();
     }

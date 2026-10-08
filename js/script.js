@@ -2050,7 +2050,7 @@ function isOrderCancellable(order) {
   return diffMs >= -60000 && diffMs <= twentyFourHoursMs;
 }
 
-window.handleCustomerCancelOrder = async function(orderId) {
+async function executeCustomerOrderCancellation(orderId, btn) {
   let order = currentCustomerOrders.find(o => o.id === orderId || o.orderId === orderId);
   if (!order) {
     const adminOrders = getAdminOrders();
@@ -2061,25 +2061,50 @@ window.handleCustomerCancelOrder = async function(orderId) {
   }
   if (!order) return;
 
-  if (!isOrderCancellable(order)) {
-    alert('This order cannot be cancelled as the 24-hour cancellation period has passed or the order has already shipped.');
+  // 1. Security Check: Customer can only cancel their own order
+  const currentUser = (window.fbAuth && window.fbAuth.currentUser) || (typeof getCustomerSession === 'function' ? getCustomerSession() : null);
+  if (currentUser) {
+    const currentUid = currentUser.uid;
+    const currentEmail = (currentUser.email || '').toLowerCase().trim();
+    const orderUid = order.userId;
+    const orderEmail = (order.customerEmail || order.email || '').toLowerCase().trim();
+    if (orderUid && orderUid !== currentUid && (!orderEmail || orderEmail !== currentEmail)) {
+      alert('Security violation: You can only cancel your own order.');
+      renderCustomerOrdersList(currentCustomerOrders);
+      return;
+    }
+  }
+
+  // 2. Status Validation: Cannot cancel already cancelled or delivered orders
+  const status = (order.status || order.orderStatus || 'Processing').trim().toLowerCase();
+  if (status === 'cancelled') {
+    alert('This order has already been cancelled.');
+    renderCustomerOrdersList(currentCustomerOrders);
+    return;
+  }
+  if (status === 'delivered') {
+    alert('Delivered orders cannot be cancelled.');
+    renderCustomerOrdersList(currentCustomerOrders);
     return;
   }
 
-  const displayNum = getDisplayOrderNumber(order);
-  const confirmed = window.confirm(`Are you sure you want to cancel Order #${displayNum}?`);
-  if (!confirmed) return;
+  // 3. 24-Hour Rule Validation: Cannot cancel after 24 hours
+  if (!isOrderCancellable(order)) {
+    alert('This order cannot be cancelled as the 24-hour cancellation period has ended.');
+    renderCustomerOrdersList(currentCustomerOrders);
+    return;
+  }
 
   const nowIso = new Date().toISOString();
 
-  // 1. Update Firestore order doc
+  // 4. Update Firestore doc (DO NOT DELETE THE ORDER DOCUMENT)
   if (window.fbDb && window.fbFns) {
     try {
       const docRef = window.fbFns.doc(window.fbDb, 'orders', order.id || order.orderId);
       await window.fbFns.updateDoc(docRef, {
         status: 'Cancelled',
         orderStatus: 'Cancelled',
-        cancelledBy: 'Customer',
+        cancelledBy: 'customer',
         cancelledAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso,
         updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso
       });
@@ -2088,36 +2113,188 @@ window.handleCustomerCancelOrder = async function(orderId) {
     }
   }
 
-  // 2. Update local customer state
+  // 5. Update local customer state
   order.status = 'Cancelled';
   order.orderStatus = 'Cancelled';
-  order.cancelledBy = 'Customer';
+  order.cancelledBy = 'customer';
   order.cancelledAt = nowIso;
 
-  // 3. Update local admin store
+  // 6. Update local admin store
   try {
     const adminOrders = getAdminOrders();
     const adminOrder = adminOrders.find(o => o.id === orderId || o.orderId === orderId);
     if (adminOrder) {
       adminOrder.status = 'Cancelled';
       adminOrder.orderStatus = 'Cancelled';
-      adminOrder.cancelledBy = 'Customer';
+      adminOrder.cancelledBy = 'customer';
       adminOrder.cancelledAt = nowIso;
       saveAdminOrders(adminOrders);
     }
   } catch (e) {}
 
-  // 4. Re-render customer UI immediately
-  renderCustomerOrdersList(currentCustomerOrders);
+  // 7. Visual completion pause: show "Cancelled" on button for 500ms before re-rendering list
+  setTimeout(() => {
+    // Re-render customer UI (will now display "Cancelled by you")
+    renderCustomerOrdersList(currentCustomerOrders);
 
-  // 5. Broadcast event so Admin panel updates instantly
-  window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
-    detail: { id: order.id || order.orderId, status: 'Cancelled', cancelledBy: 'Customer' }
-  }));
-  if (typeof renderAdminOrders === 'function') {
-    renderAdminOrders();
-  }
-};
+    // Broadcast event so Admin panel updates instantly
+    window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
+      detail: { id: order.id || order.orderId, status: 'Cancelled', cancelledBy: 'customer', cancelledAt: nowIso }
+    }));
+    if (typeof renderAdminOrders === 'function') {
+      renderAdminOrders();
+    }
+  }, 500);
+}
+
+function handleCustomerCancelOrder(orderId, btn) {
+  return executeCustomerOrderCancellation(orderId, btn);
+}
+
+window.executeCustomerOrderCancellation = executeCustomerOrderCancellation;
+window.handleCustomerCancelOrder = handleCustomerCancelOrder;
+
+function attachHoldToCancelListeners(container) {
+  if (!container) return;
+  const holdBtns = container.querySelectorAll('.my-order-hold-cancel-btn');
+  holdBtns.forEach(btn => {
+    if (btn._holdListenersAttached) return;
+    btn._holdListenersAttached = true;
+
+    const orderId = btn.getAttribute('data-order-id');
+    const textEl = btn.querySelector('.hold-btn-text');
+    const fillEl = btn.querySelector('.hold-progress-fill');
+    const HOLD_TIME_MS = 2000;
+
+    let isHolding = false;
+    let isCompleted = false;
+    let startTimestamp = 0;
+    let rafId = null;
+
+    function resetHoldAnimation() {
+      if (isCompleted) return;
+      if (isHolding) {
+        isHolding = false;
+      }
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      btn.classList.remove('is-holding');
+      if (fillEl) {
+        fillEl.style.transition = 'width 240ms cubic-bezier(0.4, 0, 0.2, 1)';
+        fillEl.style.width = '0%';
+      }
+    }
+
+    function onHoldProgress(currentTimestamp) {
+      if (!isHolding || isCompleted) return;
+      const elapsed = currentTimestamp - startTimestamp;
+      const progressRatio = Math.min(1, elapsed / HOLD_TIME_MS);
+      const progressPercent = progressRatio * 100;
+
+      if (fillEl) {
+        fillEl.style.width = progressPercent + '%';
+      }
+
+      if (progressRatio >= 1) {
+        // Full 2 seconds completed
+        isCompleted = true;
+        isHolding = false;
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+
+        // Visual completion state
+        btn.classList.remove('is-holding');
+        btn.classList.add('is-completed');
+        btn.disabled = true;
+        if (fillEl) {
+          fillEl.style.transition = 'none';
+          fillEl.style.width = '100%';
+        }
+        if (textEl) {
+          textEl.textContent = 'Cancelled';
+        }
+
+        // Trigger cancellation execution
+        window.executeCustomerOrderCancellation(orderId, btn);
+        return;
+      }
+
+      rafId = requestAnimationFrame(onHoldProgress);
+    }
+
+    function startHold(e) {
+      if (isCompleted || btn.disabled) return;
+      // Filter out non-primary clicks for mouse
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+      isHolding = true;
+      btn.classList.add('is-holding');
+      if (fillEl) {
+        fillEl.style.transition = 'none';
+        fillEl.style.width = '0%';
+      }
+      startTimestamp = performance.now();
+      rafId = requestAnimationFrame(onHoldProgress);
+    }
+
+    // Unified pointer events
+    btn.addEventListener('pointerdown', (e) => {
+      startHold(e);
+    });
+
+    btn.addEventListener('pointerup', () => {
+      resetHoldAnimation();
+    });
+
+    btn.addEventListener('pointerleave', () => {
+      resetHoldAnimation();
+    });
+
+    btn.addEventListener('pointercancel', () => {
+      resetHoldAnimation();
+    });
+
+    // Touch events fallback
+    btn.addEventListener('touchstart', (e) => {
+      startHold(e);
+    }, { passive: true });
+
+    btn.addEventListener('touchend', () => {
+      resetHoldAnimation();
+    });
+
+    btn.addEventListener('touchcancel', () => {
+      resetHoldAnimation();
+    });
+
+    // Keyboard support (Space / Enter)
+    btn.addEventListener('keydown', (e) => {
+      if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+        e.preventDefault();
+        if (!isHolding && !isCompleted) {
+          startHold(e);
+        }
+      }
+    });
+
+    btn.addEventListener('keyup', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        resetHoldAnimation();
+      }
+    });
+
+    // Normal click must NEVER cancel the order
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+}
 
 function renderCustomerOrdersList(orders) {
   if (Array.isArray(orders)) {
@@ -2146,7 +2323,7 @@ function renderCustomerOrdersList(orders) {
   }
 
   listEl.innerHTML = orders.map(order => {
-    const rawStatus = order.status || order.orderStatus || 'Processing';
+    const rawStatus = (order.status || order.orderStatus || 'Processing').trim();
     const statusClass = 'my-order-status-' + rawStatus.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const orderDocId = order.id || order.orderId || '—';
     const displayNum = getDisplayOrderNumber(order);
@@ -2158,7 +2335,54 @@ function renderCustomerOrdersList(orders) {
     const expectedDeliveryFormatted = getExpectedDeliveryForOrder(order);
     const customMsg = (order.customMessage || '').trim();
     const cancellable = isOrderCancellable(order);
-    const isCancelled = rawStatus === 'Cancelled';
+    const isCancelled = rawStatus.toLowerCase() === 'cancelled';
+    const isDelivered = rawStatus.toLowerCase() === 'delivered';
+
+    let footerHtml = '';
+    if (isCancelled) {
+      const isCancelledByCustomer = (order.cancelledBy || '').toLowerCase().trim() === 'customer';
+      const label = isCancelledByCustomer ? 'Cancelled by you' : 'Cancelled by Jayashree';
+      footerHtml = `
+        <div class="my-order-cancelled-notice">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          <span>${escapeHtml(label)}</span>
+        </div>
+      `;
+    } else if (isDelivered) {
+      // Delivered order cannot be cancelled (no cancel button)
+      footerHtml = '';
+    } else if (cancellable) {
+      // Within 24 hours: Hold to Cancel button (Reference HoldButton pattern)
+      footerHtml = `
+        <div class="my-order-cancel-wrap">
+          <button type="button" class="my-order-hold-cancel-btn" data-order-id="${escapeHtml(orderDocId)}" aria-label="Hold to Cancel">
+            <span class="hold-progress-fill" aria-hidden="true"></span>
+            <span class="hold-btn-content">
+              <svg class="hold-btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="15" y1="9" x2="9" y2="15"/>
+                <line x1="9" y1="9" x2="15" y2="15"/>
+              </svg>
+              <span class="hold-btn-text">Hold to Cancel</span>
+            </span>
+          </button>
+          <span class="my-order-cancel-hint">Hold for 2s to cancel</span>
+        </div>
+      `;
+    } else {
+      // After 24 hours: Replace cancellation button with "Cancellation period ended"
+      footerHtml = `
+        <div class="my-order-cancel-wrap">
+          <span class="my-order-period-ended">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span>Cancellation period ended</span>
+          </span>
+        </div>
+      `;
+    }
 
     return `
       <div class="my-order-card" data-order-id="${escapeHtml(orderDocId)}">
@@ -2203,23 +2427,14 @@ function renderCustomerOrdersList(orders) {
         ` : ''}
 
         <div class="my-order-footer">
-          ${cancellable ? `
-            <div class="my-order-cancel-wrap">
-              <button type="button" class="my-order-cancel-btn" onclick="handleCustomerCancelOrder('${escapeHtml(orderDocId)}')">
-                Cancel Order
-              </button>
-              <span class="my-order-cancel-hint">Within 24 hours of placing order</span>
-            </div>
-          ` : isCancelled ? `
-            <div class="my-order-cancelled-notice">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-              <span>${order.cancelledBy === 'Customer' ? 'Cancelled by you' : 'Order Cancelled'}</span>
-            </div>
-          ` : ''}
+          ${footerHtml}
         </div>
       </div>
     `;
   }).join('');
+
+  // Attach hold to cancel interaction to rendered buttons
+  attachHoldToCancelListeners(listEl);
 }
 
 let customerOrdersUnsubscribe = null;
@@ -2326,7 +2541,7 @@ function setupCustomerOrdersListener(userOrCustomer) {
 // Live update listener for instant same-window admin updates
 window.addEventListener('adminOrderStatusChanged', (e) => {
   if (!e.detail || !e.detail.id) return;
-  const { id, status, customMessage, cancelledBy } = e.detail;
+  const { id, status, customMessage, cancelledBy, cancelledAt } = e.detail;
   let changed = false;
   currentCustomerOrders.forEach(o => {
     if (o.id === id || o.orderId === id) {
@@ -2334,6 +2549,7 @@ window.addEventListener('adminOrderStatusChanged', (e) => {
       o.orderStatus = status;
       if (typeof customMessage !== 'undefined') o.customMessage = customMessage;
       if (typeof cancelledBy !== 'undefined') o.cancelledBy = cancelledBy;
+      if (typeof cancelledAt !== 'undefined') o.cancelledAt = cancelledAt;
       changed = true;
     }
   });
@@ -2969,6 +3185,7 @@ window.getExpectedDeliveryForOrder = getExpectedDeliveryForOrder;
 window.isOrderCancellable = isOrderCancellable;
 window.handleCustomerCancelOrder = handleCustomerCancelOrder;
 window.renderCustomerOrdersList = renderCustomerOrdersList;
+window.attachHoldToCancelListeners = attachHoldToCancelListeners;
 window.setupCustomerOrdersListener = setupCustomerOrdersListener;
 window.getAdminOrders = getAdminOrders;
 window.saveAdminOrders = saveAdminOrders;
@@ -2983,6 +3200,81 @@ updateAuthUI();
    ========================================================= */
 
 const DEFAULT_ADMIN_ORDERS = [
+  {
+    id: 'JAY-1051',
+    orderId: 'JAY-1051',
+    orderNumber: '1051',
+    customerName: 'Priya Sharma',
+    customerEmail: 'priya.sharma@example.com',
+    customerPhone: '+91 98200 12345',
+    product: 'Handwoven Silk Anarkali Suit',
+    size: 'M',
+    quantity: 1,
+    amount: '₹22,000',
+    price: '₹22,000',
+    date: '8 Oct 2026',
+    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    status: 'Processing',
+    orderStatus: 'Processing',
+    customMessage: '',
+    address: 'Flat 402, Green Meadows, Anna Nagar, Chennai 600040',
+    state: 'Tamil Nadu',
+    pinCode: '600040',
+    estimatedDelivery: '14–16 October 2026',
+    cancelledBy: '',
+    cancelledAt: null,
+    paymentMethod: 'Prepaid (UPI)'
+  },
+  {
+    id: 'JAY-1050',
+    orderId: 'JAY-1050',
+    orderNumber: '1050',
+    customerName: 'Priya Sharma',
+    customerEmail: 'priya.sharma@example.com',
+    customerPhone: '+91 98200 12345',
+    product: 'Chanderi Embroidered Kurta Set',
+    size: 'S',
+    quantity: 1,
+    amount: '₹12,400',
+    price: '₹12,400',
+    date: '8 Oct 2026',
+    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    status: 'Cancelled',
+    orderStatus: 'Cancelled',
+    customMessage: '',
+    address: 'Flat 402, Green Meadows, Anna Nagar, Chennai 600040',
+    state: 'Tamil Nadu',
+    pinCode: '600040',
+    estimatedDelivery: '12–14 October 2026',
+    cancelledBy: 'customer',
+    cancelledAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+    paymentMethod: 'Prepaid (Card)'
+  },
+  {
+    id: 'JAY-1049',
+    orderId: 'JAY-1049',
+    orderNumber: '1049',
+    customerName: 'Priya Sharma',
+    customerEmail: 'priya.sharma@example.com',
+    customerPhone: '+91 98200 12345',
+    product: 'Banarasi Brocade Dupatta Ensemble',
+    size: 'Free Size',
+    quantity: 1,
+    amount: '₹16,800',
+    price: '₹16,800',
+    date: '7 Oct 2026',
+    createdAt: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString(),
+    status: 'Cancelled',
+    orderStatus: 'Cancelled',
+    customMessage: '',
+    address: 'Flat 402, Green Meadows, Anna Nagar, Chennai 600040',
+    state: 'Tamil Nadu',
+    pinCode: '600040',
+    estimatedDelivery: '10–12 October 2026',
+    cancelledBy: 'admin',
+    cancelledAt: new Date(Date.now() - 22 * 60 * 60 * 1000).toISOString(),
+    paymentMethod: 'Prepaid (Net Banking)'
+  },
   {
     id: 'JAY-1048',
     orderId: 'JAY-1048',
@@ -3476,8 +3768,12 @@ function renderAdminOrders() {
                         <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
                       `).join('')}
                     </select>
-                    ${isCancelled && order.cancelledBy === 'Customer' ? `
-                      <div class="admin-cancelled-by-wrap"><span class="admin-cancelled-tag-inline">Cancelled by Customer</span></div>
+                    ${isCancelled ? `
+                      <div class="admin-cancelled-details-block">
+                        <div class="admin-cancelled-line">Status: <strong>Cancelled</strong></div>
+                        <div class="admin-cancelled-line">Cancelled by: <strong>${(order.cancelledBy || '').toLowerCase() === 'customer' ? 'Customer' : 'Admin'}</strong></div>
+                        ${order.cancelledAt ? `<div class="admin-cancelled-line admin-cancelled-time">Cancelled at: <span>${escapeHtml(formatOrderDateTime(order.cancelledAt))}</span></div>` : ''}
+                      </div>
                     ` : ''}
                     <div class="admin-custom-msg-wrap" id="adminCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block;' : 'display: none;'}">
                       <input type="text" class="admin-custom-msg-input" id="adminCustomInput_${escapeHtml(order.id)}"
@@ -3855,11 +4151,11 @@ function showOrderDetailsModal(orderId) {
         </div>
         ${isCancelled ? `
           <div class="admin-cancelled-alert">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            <div>
-              <strong>Order Status: Cancelled</strong>
-              ${order.cancelledBy === 'Customer' ? '<span class="admin-cancelled-by-pill">Cancelled by: Customer</span>' : ''}
-              ${order.cancelledAt ? `<div style="font-size: 11.5px; margin-top: 3px; opacity: 0.85;">Cancelled on: ${escapeHtml(formatOrderDateTime(order.cancelledAt))}</div>` : ''}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            <div class="admin-cancelled-alert-body">
+              <div class="admin-cancelled-alert-row">Status: <strong>Cancelled</strong></div>
+              <div class="admin-cancelled-alert-row">Cancelled by: <strong>${(order.cancelledBy || '').toLowerCase() === 'customer' ? 'Customer' : 'Admin'}</strong></div>
+              ${order.cancelledAt ? `<div class="admin-cancelled-alert-row">Cancelled at: <strong>${escapeHtml(formatOrderDateTime(order.cancelledAt))}</strong></div>` : ''}
             </div>
           </div>
         ` : ''}
@@ -4117,12 +4413,14 @@ window.handleAdminOrderStatusChange = async function(id, newStatus) {
         updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
       };
       if (newStatus === 'Cancelled') {
-        if (!order || !order.cancelledBy) {
-          updateData.cancelledBy = 'Admin';
-          updateData.cancelledAt = window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString();
+        const currentBy = (order?.cancelledBy || '').toLowerCase();
+        if (!currentBy) {
+          const nowIso = new Date().toISOString();
+          updateData.cancelledBy = 'admin';
+          updateData.cancelledAt = window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso;
           if (order) {
-            order.cancelledBy = 'Admin';
-            order.cancelledAt = new Date().toISOString();
+            order.cancelledBy = 'admin';
+            order.cancelledAt = nowIso;
           }
         }
       }
@@ -4137,7 +4435,13 @@ window.handleAdminOrderStatusChange = async function(id, newStatus) {
 
   // Broadcast same-window event for instant local update
   window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
-    detail: { id, status: newStatus, customMessage: order?.customMessage || '', cancelledBy: order?.cancelledBy || '' }
+    detail: { 
+      id, 
+      status: newStatus, 
+      customMessage: order?.customMessage || '', 
+      cancelledBy: order?.cancelledBy || '',
+      cancelledAt: order?.cancelledAt || ''
+    }
   }));
 };
 
