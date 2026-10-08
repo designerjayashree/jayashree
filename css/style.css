@@ -2293,7 +2293,255 @@ body.menu-open {
   color: #1B6E36;
   font-size: 12px;
   font-weight: 500;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
+}
+
+/* Customer My Orders in Account Area */
+.auth-modal.has-user-view {
+  max-width: 500px;
+}
+
+.customer-my-orders-section {
+  text-align: left;
+  margin: 14px 0 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.customer-my-orders-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.customer-my-orders-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--charcoal);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.customer-my-orders-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--cream);
+  color: var(--espresso);
+  border: 1px solid var(--border);
+}
+
+.customer-my-orders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.customer-my-orders-list::-webkit-scrollbar {
+  width: 5px;
+}
+.customer-my-orders-list::-webkit-scrollbar-thumb {
+  background: var(--taupe);
+  border-radius: 4px;
+}
+
+.my-order-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px -2px rgba(47, 41, 36, 0.04);
+}
+
+.my-order-card:hover {
+  border-color: var(--taupe);
+  box-shadow: 0 4px 12px -2px rgba(47, 41, 36, 0.08);
+}
+
+.my-order-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 10px;
+}
+
+.my-order-id-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.my-order-id-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.my-order-id {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--espresso);
+  font-family: monospace;
+}
+
+.my-order-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.my-order-status-processing {
+  background: #FEF7EC;
+  color: #B45309;
+  border: 1px solid #FDE68A;
+}
+
+.my-order-status-confirmed {
+  background: #EFF6FF;
+  color: #1D4ED8;
+  border: 1px solid #BFDBFE;
+}
+
+.my-order-status-shipped {
+  background: #F5F3FF;
+  color: #6D28D9;
+  border: 1px solid #DDD6FE;
+}
+
+.my-order-status-out-for-delivery {
+  background: #ECFDF5;
+  color: #047857;
+  border: 1px solid #A7F3D0;
+}
+
+.my-order-status-delivered {
+  background: #EEF8F1;
+  color: #15803D;
+  border: 1px solid #BBF7D0;
+}
+
+.my-order-status-cancelled {
+  background: #FEF2F2;
+  color: #B91C1C;
+  border: 1px solid #FECACA;
+}
+
+.my-order-status-other {
+  background: #FBF8F5;
+  color: #4A382A;
+  border: 1px solid #E6DFD5;
+}
+
+.my-order-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.my-order-product-name {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--charcoal);
+  margin: 0 0 4px;
+  line-height: 1.3;
+}
+
+.my-order-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.my-order-meta strong {
+  color: var(--charcoal);
+}
+
+.my-order-amount {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--espresso);
+  white-space: nowrap;
+}
+
+.my-order-footer {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(47, 41, 36, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.my-order-date {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.my-order-custom-msg-box {
+  background: #FCFAF7;
+  border: 1px solid #EAE3D9;
+  border-left: 3px solid var(--espresso);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+
+.my-order-custom-msg-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--espresso);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.my-order-custom-msg-text {
+  font-size: 12.5px;
+  color: var(--charcoal);
+  line-height: 1.45;
+  margin: 0;
+  font-style: italic;
+}
+
+.my-orders-empty {
+  text-align: center;
+  padding: 28px 16px;
+  color: var(--muted);
+}
+
+.my-orders-empty svg {
+  margin-bottom: 8px;
+  opacity: 0.6;
+}
+
+.my-orders-empty p {
+  font-size: 13.5px;
+  margin: 0;
 }
 
 /* ==========================================
@@ -3270,6 +3518,70 @@ body.menu-open {
   background: #4A382A;
   color: #FFFFFF;
   border-color: #4A382A;
+}
+
+/* Admin Order Status Dropdown & Custom Message Input */
+.admin-status-col {
+  min-width: 170px;
+}
+
+.admin-status-control-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-order-status-select {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--charcoal);
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  width: 100%;
+  max-width: 180px;
+}
+
+.admin-order-status-select:focus {
+  border-color: var(--espresso);
+  box-shadow: 0 0 0 2px rgba(74, 56, 42, 0.1);
+}
+
+.admin-custom-msg-wrap {
+  margin-top: 4px;
+}
+
+.admin-custom-msg-input {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--charcoal);
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease;
+}
+
+.admin-custom-msg-input:focus {
+  border-color: var(--espresso);
+}
+
+.admin-custom-msg-preview {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 3px;
+  line-height: 1.35;
+  max-width: 200px;
+  word-break: break-word;
 }
 
 /* ==========================================

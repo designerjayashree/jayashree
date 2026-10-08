@@ -701,6 +701,7 @@ function executeOrderPayment(orderPayload) {
       paymentStatus: 'Paid',
       orderStatus: 'Processing',
       status: 'Processing',
+      customMessage: '',
       paymentMethod: 'Prepaid / Online',
       razorpayOrderId: 'sim_ord_' + randomSuffix,
       razorpayPaymentId: paymentResponse?.paymentId || ('pay_sim_' + randomSuffix),
@@ -762,7 +763,10 @@ function executeOrderPayment(orderPayload) {
       const currentAdminOrders = getAdminOrders();
       currentAdminOrders.unshift({
         id: orderId,
+        orderId: orderId,
+        userId: finalUid,
         date: firestoreOrder.date,
+        createdAt: new Date().toISOString(),
         customerName: firestoreOrder.customerName,
         customerEmail: finalEmail,
         customerPhone: '—',
@@ -770,7 +774,10 @@ function executeOrderPayment(orderPayload) {
         size: firestoreOrder.size,
         quantity: 1,
         amount: formattedPrice,
+        price: formattedPrice,
         status: 'Processing',
+        orderStatus: 'Processing',
+        customMessage: '',
         paymentMethod: 'Online',
         address: orderPayload.formattedAddress
       });
@@ -1857,6 +1864,245 @@ function clearCustomerSession() {
   updateAuthUI();
 }
 
+const ORDER_STATUS_OPTIONS = [
+  'Processing',
+  'Confirmed',
+  'Shipped',
+  'Out for Delivery',
+  'Delivered',
+  'Cancelled',
+  'Other'
+];
+
+function getOrderTimestamp(order) {
+  if (!order) return 0;
+  const c = order.createdAt;
+  if (c) {
+    if (typeof c.toMillis === 'function') return c.toMillis();
+    if (typeof c.toDate === 'function') return c.toDate().getTime();
+    if (typeof c === 'object' && typeof c.seconds === 'number') {
+      return c.seconds * 1000 + (c.nanoseconds ? Math.floor(c.nanoseconds / 1e6) : 0);
+    }
+    if (typeof c === 'number') return c;
+    if (typeof c === 'string') {
+      const parsed = Date.parse(c);
+      if (!isNaN(parsed)) return parsed;
+    }
+  }
+  if (order.updatedAt) {
+    const u = order.updatedAt;
+    if (typeof u.toMillis === 'function') return u.toMillis();
+    if (typeof u.toDate === 'function') return u.toDate().getTime();
+    if (typeof u === 'object' && typeof u.seconds === 'number') {
+      return u.seconds * 1000;
+    }
+    if (typeof u === 'string') {
+      const parsed = Date.parse(u);
+      if (!isNaN(parsed)) return parsed;
+    }
+  }
+  if (typeof order.id === 'string') {
+    const numMatch = order.id.match(/\d{10,}/);
+    if (numMatch) return parseInt(numMatch[0], 10);
+  }
+  if (order.date && typeof order.date === 'string') {
+    const parsed = Date.parse(order.date);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function formatOrderDisplayDate(order) {
+  if (!order) return 'Recent';
+  const c = order.createdAt;
+  let dateObj = null;
+  if (c) {
+    if (typeof c.toDate === 'function') dateObj = c.toDate();
+    else if (typeof c === 'object' && typeof c.seconds === 'number') dateObj = new Date(c.seconds * 1000);
+    else if (typeof c === 'number') dateObj = new Date(c);
+    else if (typeof c === 'string') {
+      const parsed = Date.parse(c);
+      if (!isNaN(parsed)) dateObj = new Date(parsed);
+    }
+  }
+  if (dateObj && !isNaN(dateObj.getTime())) {
+    return dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  return order.date || 'Recent';
+}
+
+function renderCustomerOrdersList(orders) {
+  const listEl = document.getElementById('customerMyOrdersList');
+  const badgeEl = document.getElementById('customerOrdersCountBadge');
+  if (!listEl) return;
+
+  if (badgeEl) {
+    badgeEl.textContent = `${orders.length} ${orders.length === 1 ? 'Order' : 'Orders'}`;
+  }
+
+  if (!orders || orders.length === 0) {
+    listEl.innerHTML = `
+      <div class="my-orders-empty">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <path d="M16 10a4 4 0 0 1-8 0"/>
+        </svg>
+        <p>No orders placed yet.</p>
+      </div>
+    `;
+    return;
+  }
+
+  listEl.innerHTML = orders.map(order => {
+    const rawStatus = order.status || order.orderStatus || 'Processing';
+    const statusClass = 'my-order-status-' + rawStatus.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const orderId = order.id || order.orderId || '—';
+    const productName = order.product || order.productName || 'Designer Outfit';
+    const size = order.size || 'Standard';
+    const amount = order.amount || order.price || '—';
+    const displayDate = formatOrderDisplayDate(order);
+    const customMsg = (order.customMessage || '').trim();
+
+    return `
+      <div class="my-order-card" data-order-id="${escapeHtml(orderId)}">
+        <div class="my-order-card-header">
+          <div class="my-order-id-wrap">
+            <span class="my-order-id-label">Order</span>
+            <span class="my-order-id">#${escapeHtml(orderId)}</span>
+          </div>
+          <span class="my-order-status-pill ${statusClass}">${escapeHtml(rawStatus)}</span>
+        </div>
+        <div class="my-order-body">
+          <div class="my-order-info">
+            <h4 class="my-order-product-name">${escapeHtml(productName)}</h4>
+            <div class="my-order-meta">
+              <span>Size: <strong>${escapeHtml(size)}</strong></span>
+            </div>
+          </div>
+          <div class="my-order-amount">${escapeHtml(amount)}</div>
+        </div>
+        ${customMsg ? `
+          <div class="my-order-custom-msg-box">
+            <div class="my-order-custom-msg-header">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>Message from Jayashree</span>
+            </div>
+            <p class="my-order-custom-msg-text">${escapeHtml(customMsg)}</p>
+          </div>
+        ` : ''}
+        <div class="my-order-footer">
+          <div class="my-order-date">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span>${escapeHtml(displayDate)}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+let customerOrdersUnsubscribe = null;
+let currentCustomerOrders = [];
+
+function setupCustomerOrdersListener(userOrCustomer) {
+  if (customerOrdersUnsubscribe) {
+    try { customerOrdersUnsubscribe(); } catch (e) {}
+    customerOrdersUnsubscribe = null;
+  }
+
+  const listEl = document.getElementById('customerMyOrdersList');
+  const badgeEl = document.getElementById('customerOrdersCountBadge');
+  if (!userOrCustomer || !userOrCustomer.uid || userOrCustomer.provider === 'guest') {
+    currentCustomerOrders = [];
+    if (listEl) listEl.innerHTML = '';
+    if (badgeEl) badgeEl.textContent = '0 Orders';
+    return;
+  }
+
+  const uid = userOrCustomer.uid;
+  const email = (userOrCustomer.email || '').toLowerCase().trim();
+
+  function processAndRender(ordersList) {
+    const map = new Map();
+    ordersList.forEach(o => {
+      const orderId = o.id || o.orderId;
+      if (orderId && !map.has(orderId)) {
+        map.set(orderId, o);
+      }
+    });
+    const uniqueOrders = Array.from(map.values());
+    // Strict sort: newest order FIRST (descending creation timestamp)
+    uniqueOrders.sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
+    currentCustomerOrders = uniqueOrders;
+    renderCustomerOrdersList(uniqueOrders);
+  }
+
+  // First populate immediately from local orders if matching
+  try {
+    const allLocal = getAdminOrders().filter(o =>
+      o.userId === uid || (email && o.customerEmail && o.customerEmail.toLowerCase() === email)
+    );
+    processAndRender(allLocal);
+  } catch (e) {}
+
+  if (!window.fbDb || !window.fbFns) return;
+
+  try {
+    const qUser = window.fbFns.query(
+      window.fbFns.collection(window.fbDb, 'orders'),
+      window.fbFns.where('userId', '==', uid)
+    );
+
+    customerOrdersUnsubscribe = window.fbFns.onSnapshot(qUser, (snapshot) => {
+      const fetched = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        fetched.push({
+          id: data.orderId || docSnap.id,
+          orderId: data.orderId || docSnap.id,
+          userId: data.userId || uid,
+          product: data.product || data.productName || 'Designer Outfit',
+          productName: data.productName || data.product || 'Designer Outfit',
+          size: data.size || 'Standard',
+          amount: data.amount || data.price || '₹0',
+          price: data.price || data.amount || '₹0',
+          status: data.orderStatus || data.status || 'Processing',
+          orderStatus: data.orderStatus || data.status || 'Processing',
+          customMessage: data.customMessage || '',
+          date: data.date || 'Recent',
+          createdAt: data.createdAt || null,
+          customerName: data.customerName || '',
+          customerEmail: data.customerEmail || ''
+        });
+      });
+      processAndRender(fetched);
+    }, (err) => {
+      console.warn('Customer orders listener error:', err);
+    });
+  } catch (err) {
+    console.warn('setupCustomerOrdersListener error:', err);
+  }
+}
+
+// Live update listener for instant same-window admin updates
+window.addEventListener('adminOrderStatusChanged', (e) => {
+  if (!e.detail || !e.detail.id) return;
+  const { id, status, customMessage } = e.detail;
+  let changed = false;
+  currentCustomerOrders.forEach(o => {
+    if (o.id === id || o.orderId === id) {
+      o.status = status;
+      o.orderStatus = status;
+      if (typeof customMessage !== 'undefined') o.customMessage = customMessage;
+      changed = true;
+    }
+  });
+  if (changed) {
+    renderCustomerOrdersList(currentCustomerOrders);
+  }
+});
+
 function updateAuthUI() {
   const customer = getCustomerSession();
   const openAuthBtn = document.getElementById('openAuthBtn');
@@ -1892,6 +2138,8 @@ function updateAuthUI() {
     if (mobileLabel) mobileLabel.textContent = 'Account';
     if (authUserEmail) authUserEmail.textContent = customer.email;
     if (authUserInitials) authUserInitials.textContent = initial;
+
+    setupCustomerOrdersListener(customer);
   } else {
     // When user logs out, change it back to "Login"
     if (loggedOutView) loggedOutView.style.display = 'inline-flex';
@@ -1903,6 +2151,8 @@ function updateAuthUI() {
     }
     if (label) label.textContent = 'Login';
     if (mobileLabel) mobileLabel.textContent = 'Login / Sign Up';
+
+    setupCustomerOrdersListener(null);
   }
 }
 
@@ -1958,9 +2208,11 @@ function openAuthModal(mode = 'login', fromBuyNow = false) {
   setAuthMode(mode);
 
   const customer = getCustomerSession();
+  const authModalEl = document.querySelector('.auth-modal');
   if (fromBuyNow) {
     if (authFormView) authFormView.style.display = 'block';
     if (authUserView) authUserView.style.display = 'none';
+    if (authModalEl) authModalEl.classList.remove('has-user-view');
     const prefillEmail = pendingOrderCheckout?.email || (customer && customer.email) || '';
     if (authEmailInput && prefillEmail) {
       authEmailInput.value = prefillEmail;
@@ -1969,9 +2221,12 @@ function openAuthModal(mode = 'login', fromBuyNow = false) {
     if (customer && customer.email && customer.provider !== 'guest') {
       if (authFormView) authFormView.style.display = 'none';
       if (authUserView) authUserView.style.display = 'block';
+      if (authModalEl) authModalEl.classList.add('has-user-view');
+      setupCustomerOrdersListener(customer);
     } else {
       if (authFormView) authFormView.style.display = 'block';
       if (authUserView) authUserView.style.display = 'none';
+      if (authModalEl) authModalEl.classList.remove('has-user-view');
     }
   }
 
@@ -1988,6 +2243,8 @@ function openAuthModal(mode = 'login', fromBuyNow = false) {
 function closeAuthModal() {
   if (!authModalOverlay) return;
   authModalOverlay.classList.remove('open');
+  const authModalEl = document.querySelector('.auth-modal');
+  if (authModalEl) authModalEl.classList.remove('has-user-view');
   const checkoutOverlay = document.getElementById('checkoutModalOverlay');
   if (!checkoutOverlay || !checkoutOverlay.classList.contains('open')) {
     document.body.classList.remove('popup-open');
@@ -2459,8 +2716,21 @@ ensureStateOptions();
 // Initialize customer authentication state on startup
 window.updateAuthUI = updateAuthUI;
 window.clearCustomerSession = clearCustomerSession;
+window.setCustomerSession = setCustomerSession;
+window.openAuthModal = openAuthModal;
+window.closeAuthModal = closeAuthModal;
 window.openCheckoutModal = openCheckoutModal;
 window.closeCheckoutModal = closeCheckoutModal;
+window.ORDER_STATUS_OPTIONS = ORDER_STATUS_OPTIONS;
+window.getOrderTimestamp = getOrderTimestamp;
+window.formatOrderDisplayDate = formatOrderDisplayDate;
+window.renderCustomerOrdersList = renderCustomerOrdersList;
+window.setupCustomerOrdersListener = setupCustomerOrdersListener;
+window.getAdminOrders = getAdminOrders;
+window.saveAdminOrders = saveAdminOrders;
+window.showAdminDashboard = showAdminDashboard;
+window.renderAdminOrders = renderAdminOrders;
+window.loadAdminDataFromFirestore = loadAdminDataFromFirestore;
 updateAuthUI();
 
 /* =========================================================
@@ -2470,6 +2740,7 @@ updateAuthUI();
 const DEFAULT_ADMIN_ORDERS = [
   {
     id: 'JAY-1048',
+    orderId: 'JAY-1048',
     customerName: 'Priya Sharma',
     customerEmail: 'priya.sharma@example.com',
     customerPhone: '+91 98200 12345',
@@ -2477,13 +2748,18 @@ const DEFAULT_ADMIN_ORDERS = [
     size: 'M',
     quantity: 1,
     amount: '₹18,500',
+    price: '₹18,500',
     date: '28 Sep 2026',
+    createdAt: '2026-09-28T10:00:00.000Z',
     status: 'Processing',
+    orderStatus: 'Processing',
+    customMessage: '',
     address: 'Flat 402, Green Meadows, Anna Nagar, Chennai 600040',
     paymentMethod: 'Prepaid (UPI)'
   },
   {
     id: 'JAY-1047',
+    orderId: 'JAY-1047',
     customerName: 'Ananya Reddy',
     customerEmail: 'ananya.r@example.com',
     customerPhone: '+91 98490 23456',
@@ -2491,13 +2767,18 @@ const DEFAULT_ADMIN_ORDERS = [
     size: 'L',
     quantity: 2,
     amount: '₹14,800',
+    price: '₹14,800',
     date: '26 Sep 2026',
+    createdAt: '2026-09-26T14:30:00.000Z',
     status: 'Shipped',
+    orderStatus: 'Shipped',
+    customMessage: '',
     address: '12, Jubilee Hills, Hyderabad 500033',
     paymentMethod: 'Credit Card (HDFC)'
   },
   {
     id: 'JAY-1046',
+    orderId: 'JAY-1046',
     customerName: 'Meera Nair',
     customerEmail: 'meera.nair@example.com',
     customerPhone: '+91 97455 34567',
@@ -2505,13 +2786,18 @@ const DEFAULT_ADMIN_ORDERS = [
     size: 'Free Size',
     quantity: 1,
     amount: '₹34,000',
+    price: '₹34,000',
     date: '24 Sep 2026',
+    createdAt: '2026-09-24T09:15:00.000Z',
     status: 'Delivered',
+    orderStatus: 'Delivered',
+    customMessage: '',
     address: '7A, Skyline Apts, Panampilly Nagar, Kochi 682036',
     paymentMethod: 'Net Banking'
   },
   {
     id: 'JAY-1045',
+    orderId: 'JAY-1045',
     customerName: 'Dr. Pooja Chawla',
     customerEmail: 'pooja.c@example.com',
     customerPhone: '+91 98111 45678',
@@ -2519,13 +2805,18 @@ const DEFAULT_ADMIN_ORDERS = [
     size: 'S',
     quantity: 1,
     amount: '₹11,200',
+    price: '₹11,200',
     date: '22 Sep 2026',
+    createdAt: '2026-09-22T16:45:00.000Z',
     status: 'Delivered',
+    orderStatus: 'Delivered',
+    customMessage: '',
     address: 'C-14, Vasant Vihar, New Delhi 110057',
     paymentMethod: 'Prepaid (UPI)'
   },
   {
     id: 'JAY-1044',
+    orderId: 'JAY-1044',
     customerName: 'Tanvi Patel',
     customerEmail: 'tanvi.p@example.com',
     customerPhone: '+91 99099 56789',
@@ -2533,8 +2824,12 @@ const DEFAULT_ADMIN_ORDERS = [
     size: 'M',
     quantity: 1,
     amount: '₹26,500',
+    price: '₹26,500',
     date: '19 Sep 2026',
+    createdAt: '2026-09-19T11:20:00.000Z',
     status: 'Confirmed',
+    orderStatus: 'Confirmed',
+    customMessage: '',
     address: '801, Riviera Heights, Bodakdev, Ahmedabad 380054',
     paymentMethod: 'Debit Card'
   }
@@ -2722,6 +3017,7 @@ function showAdminDashboard() {
   if (dashView) dashView.style.display = '';
   switchAdminTab(currentAdminTab);
   loadAdminDataFromFirestore();
+  setupAdminOrdersListener();
 }
 
 function switchAdminTab(tabName) {
@@ -2782,32 +3078,50 @@ function renderAdminOrders() {
             <th>Qty</th>
             <th>Amount</th>
             <th>Date</th>
-            <th>Status</th>
+            <th class="admin-status-col">Status</th>
             <th>Action</th>
           </tr>
         </thead>
         <tbody>
-          ${orders.map(order => `
-            <tr>
-              <td>
-                <div class="admin-customer-name">${escapeHtml(order.customerName)}</div>
-                <div class="admin-customer-sub">${escapeHtml(order.id)}</div>
-              </td>
-              <td>
-                <div class="admin-product-title">${escapeHtml(order.product)}</div>
-                <div class="admin-product-meta">Size: <strong>${escapeHtml(order.size)}</strong></div>
-              </td>
-              <td><strong>${order.quantity}</strong></td>
-              <td><strong style="color: var(--espresso);">${escapeHtml(order.amount)}</strong></td>
-              <td>${escapeHtml(order.date)}</td>
-              <td>
-                <span class="admin-status-pill admin-status-${order.status.toLowerCase()}">${escapeHtml(order.status)}</span>
-              </td>
-              <td>
-                <button type="button" class="admin-view-btn" data-action="view-order" data-id="${order.id}">Details</button>
-              </td>
-            </tr>
-          `).join('')}
+          ${orders.map(order => {
+            const currentStatus = order.status || order.orderStatus || 'Processing';
+            const isOther = currentStatus === 'Other';
+            const customMsg = order.customMessage || '';
+            return `
+              <tr>
+                <td>
+                  <div class="admin-customer-name">${escapeHtml(order.customerName)}</div>
+                  <div class="admin-customer-sub">#${escapeHtml(order.id)}</div>
+                </td>
+                <td>
+                  <div class="admin-product-title">${escapeHtml(order.product)}</div>
+                  <div class="admin-product-meta">Size: <strong>${escapeHtml(order.size)}</strong></div>
+                </td>
+                <td><strong>${order.quantity}</strong></td>
+                <td><strong style="color: var(--espresso);">${escapeHtml(order.amount)}</strong></td>
+                <td>${escapeHtml(order.date || 'Recent')}</td>
+                <td class="admin-status-control-cell">
+                  <select class="admin-order-status-select" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
+                    ${ORDER_STATUS_OPTIONS.map(opt => `
+                      <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
+                    `).join('')}
+                  </select>
+                  <div class="admin-custom-msg-wrap" id="adminCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block;' : 'display: none;'}">
+                    <input type="text" class="admin-custom-msg-input" id="adminCustomInput_${escapeHtml(order.id)}"
+                      placeholder="Type custom status message..."
+                      value="${escapeHtml(customMsg)}"
+                      oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+                      onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+                      onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
+                  </div>
+                  ${customMsg && !isOther ? `<div class="admin-custom-msg-preview">${escapeHtml(customMsg)}</div>` : ''}
+                </td>
+                <td>
+                  <button type="button" class="admin-view-btn" data-action="view-order" data-id="${escapeHtml(order.id)}">Details</button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
         </tbody>
       </table>
     </div>
@@ -2921,15 +3235,19 @@ function showOrderDetailsModal(orderId) {
   const order = orders.find(o => o.id === orderId);
   if (!order) return;
 
+  const currentStatus = order.status || order.orderStatus || 'Processing';
+  const isOther = currentStatus === 'Other';
+  const customMsg = order.customMessage || '';
+
   const content = `
     <div class="admin-detail-grid">
       <div class="admin-detail-block">
         <span class="admin-detail-label">Order Number</span>
-        <span class="admin-detail-val"><strong>${escapeHtml(order.id)}</strong></span>
+        <span class="admin-detail-val"><strong>#${escapeHtml(order.id)}</strong></span>
       </div>
       <div class="admin-detail-block">
         <span class="admin-detail-label">Order Date</span>
-        <span class="admin-detail-val">${escapeHtml(order.date)}</span>
+        <span class="admin-detail-val">${escapeHtml(order.date || 'Recent')}</span>
       </div>
       <div class="admin-detail-block">
         <span class="admin-detail-label">Customer Name</span>
@@ -2937,21 +3255,27 @@ function showOrderDetailsModal(orderId) {
       </div>
       <div class="admin-detail-block">
         <span class="admin-detail-label">Contact Email</span>
-        <span class="admin-detail-val"><a href="mailto:${escapeHtml(order.customerEmail)}">${escapeHtml(order.customerEmail)}</a></span>
+        <span class="admin-detail-val">${order.customerEmail ? `<a href="mailto:${escapeHtml(order.customerEmail)}">${escapeHtml(order.customerEmail)}</a>` : '—'}</span>
       </div>
       <div class="admin-detail-block">
         <span class="admin-detail-label">Phone</span>
-        <span class="admin-detail-val"><a href="tel:${escapeHtml(order.customerPhone)}">${escapeHtml(order.customerPhone)}</a></span>
+        <span class="admin-detail-val">${order.customerPhone && order.customerPhone !== '—' ? `<a href="tel:${escapeHtml(order.customerPhone)}">${escapeHtml(order.customerPhone)}</a>` : '—'}</span>
       </div>
       <div class="admin-detail-block">
         <span class="admin-detail-label">Order Status</span>
-        <select class="admin-status-dropdown" onchange="updateOrderStatus('${order.id}', this.value)">
-          <option value="New" ${order.status === 'New' ? 'selected' : ''}>New</option>
-          <option value="Confirmed" ${order.status === 'Confirmed' ? 'selected' : ''}>Confirmed</option>
-          <option value="Processing" ${order.status === 'Processing' ? 'selected' : ''}>Processing</option>
-          <option value="Shipped" ${order.status === 'Shipped' ? 'selected' : ''}>Shipped</option>
-          <option value="Delivered" ${order.status === 'Delivered' ? 'selected' : ''}>Delivered</option>
+        <select class="admin-status-dropdown" data-order-id="${escapeHtml(order.id)}" onchange="handleAdminOrderStatusChange('${escapeHtml(order.id)}', this.value)">
+          ${ORDER_STATUS_OPTIONS.map(opt => `
+            <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
+          `).join('')}
         </select>
+        <div class="admin-custom-msg-wrap" id="modalCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block; margin-top: 8px;' : 'display: none; margin-top: 8px;'}">
+          <input type="text" class="admin-custom-msg-input" id="modalCustomInput_${escapeHtml(order.id)}"
+            placeholder="Type custom status message (e.g. Fabric not found)..."
+            value="${escapeHtml(customMsg)}"
+            oninput="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+            onchange="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)"
+            onblur="handleAdminOrderCustomMsgChange('${escapeHtml(order.id)}', this.value)">
+        </div>
       </div>
       <div class="admin-detail-block admin-detail-full">
         <span class="admin-detail-label">Shipping Address</span>
@@ -3076,67 +3400,150 @@ function showHelpDetailsModal(helpId) {
   openAdminModal(`Help Request • ${escapeHtml(q.customerName || 'Customer')}`, content);
 }
 
-window.updateOrderStatus = async function(id, newStatus) {
+let adminCustomMsgDebounce = {};
+let adminOrdersUnsubscribe = null;
+
+window.handleAdminOrderStatusChange = async function(id, newStatus) {
   const orders = getAdminOrders();
   const order = orders.find(o => o.id === id);
   if (order) {
     order.status = newStatus;
     order.orderStatus = newStatus;
     saveAdminOrders(orders);
-    renderAdminOrders();
   }
+
+  // Update dropdown value in DOM if present
+  document.querySelectorAll(`select[data-order-id="${id}"]`).forEach(sel => {
+    if (sel.value !== newStatus) sel.value = newStatus;
+  });
+
+  // Toggle custom message wrap in table and in modal
+  const adminWrap = document.getElementById(`adminCustomWrap_${id}`);
+  if (adminWrap) adminWrap.style.display = newStatus === 'Other' ? 'block' : 'none';
+
+  const modalWrap = document.getElementById(`modalCustomWrap_${id}`);
+  if (modalWrap) modalWrap.style.display = newStatus === 'Other' ? 'block' : 'none';
+
+  if (newStatus === 'Other') {
+    const inp = document.getElementById(`modalCustomInput_${id}`) || document.getElementById(`adminCustomInput_${id}`);
+    if (inp) setTimeout(() => inp.focus(), 60);
+  }
+
+  // Persist to Firestore
   if (window.fbDb && window.fbFns) {
     try {
-      await window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'orders', id), {
+      const updateData = {
         status: newStatus,
         orderStatus: newStatus,
-        updatedAt: window.fbFns.serverTimestamp()
-      });
+        updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
+      };
+      if (order && typeof order.customMessage !== 'undefined') {
+        updateData.customMessage = order.customMessage;
+      }
+      await window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'orders', id), updateData);
     } catch (err) {
-      console.warn('Firestore updateOrderStatus error:', err);
+      console.warn('Firestore handleAdminOrderStatusChange error:', err);
     }
   }
+
+  // Broadcast same-window event for instant local update
+  window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
+    detail: { id, status: newStatus, customMessage: order?.customMessage || '' }
+  }));
 };
 
-window.updateCustomisationStatus = async function(id, newStatus) {
-  const items = getAdminCustomisations();
-  const item = items.find(i => i.id === id);
-  if (item) {
-    item.status = newStatus;
-    saveAdminCustomisations(items);
-    renderAdminCustomisation();
+window.handleAdminOrderCustomMsgChange = async function(id, customMsg) {
+  const text = (customMsg || '').trim();
+  const orders = getAdminOrders();
+  const order = orders.find(o => o.id === id);
+  if (order) {
+    order.customMessage = text;
+    saveAdminOrders(orders);
   }
-  if (window.fbDb && window.fbFns) {
-    try {
-      await window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'customisationRequests', id), {
-        status: newStatus,
-        updatedAt: window.fbFns.serverTimestamp()
-      });
-    } catch (err) {
-      console.warn('Firestore updateCustomisationStatus error:', err);
+
+  // Sync inputs across table and modal
+  const adminInp = document.getElementById(`adminCustomInput_${id}`);
+  const modalInp = document.getElementById(`modalCustomInput_${id}`);
+  if (adminInp && adminInp.value !== customMsg) adminInp.value = customMsg;
+  if (modalInp && modalInp.value !== customMsg) modalInp.value = customMsg;
+
+  // Immediately dispatch event for synchronous UI sync
+  window.dispatchEvent(new CustomEvent('adminOrderStatusChanged', {
+    detail: { id, status: order?.status || 'Other', customMessage: text }
+  }));
+
+  // Debounced Firestore update
+  if (adminCustomMsgDebounce[id]) {
+    clearTimeout(adminCustomMsgDebounce[id]);
+  }
+  adminCustomMsgDebounce[id] = setTimeout(async () => {
+    if (window.fbDb && window.fbFns) {
+      try {
+        await window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'orders', id), {
+          customMessage: text,
+          updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn('Firestore handleAdminOrderCustomMsgChange error:', err);
+      }
     }
-  }
+  }, 250);
 };
 
-window.updateHelpStatus = async function(id, newStatus) {
-  const items = getAdminHelp();
-  const item = items.find(i => i.id === id);
-  if (item) {
-    item.status = newStatus;
-    saveAdminHelp(items);
-    renderAdminHelp();
+window.updateOrderStatus = window.handleAdminOrderStatusChange;
+
+function setupAdminOrdersListener() {
+  if (!window.fbDb || !window.fbFns) return;
+  if (adminOrdersUnsubscribe) {
+    try { adminOrdersUnsubscribe(); } catch (e) {}
+    adminOrdersUnsubscribe = null;
   }
-  if (window.fbDb && window.fbFns) {
-    try {
-      await window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'helpRequests', id), {
-        status: newStatus,
-        updatedAt: window.fbFns.serverTimestamp()
-      });
-    } catch (err) {
-      console.warn('Firestore updateHelpStatus error:', err);
-    }
+  try {
+    adminOrdersUnsubscribe = window.fbFns.onSnapshot(
+      window.fbFns.collection(window.fbDb, 'orders'),
+      (snapshot) => {
+        const fbOrders = [];
+        snapshot.forEach(d => {
+          const data = d.data();
+          fbOrders.push({
+            id: data.orderId || d.id,
+            orderId: data.orderId || d.id,
+            userId: data.userId || '',
+            date: data.date || 'Recent',
+            createdAt: data.createdAt || null,
+            customerName: data.customerName || (data.customerEmail ? data.customerEmail.split('@')[0] : 'Customer'),
+            customerEmail: data.customerEmail || '',
+            customerPhone: data.customerPhone || '—',
+            product: data.productName || data.product || 'Designer Outfit',
+            size: data.size || 'Standard',
+            quantity: data.quantity || 1,
+            amount: data.amount || data.price || '₹0',
+            price: data.price || data.amount || '₹0',
+            status: data.orderStatus || data.status || 'Processing',
+            orderStatus: data.orderStatus || data.status || 'Processing',
+            customMessage: data.customMessage || '',
+            paymentMethod: data.paymentMethod || 'Online',
+            address: data.address || data.fullAddress || '—'
+          });
+        });
+        fbOrders.sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
+        saveAdminOrders(fbOrders);
+        if (currentAdminTab === 'orders') {
+          const active = document.activeElement;
+          const isTyping = active && active.classList && active.classList.contains('admin-custom-msg-input');
+          if (!isTyping) {
+            renderAdminOrders();
+          }
+        }
+      },
+      (err) => {
+        console.warn('Admin orders listener error:', err);
+      }
+    );
+  } catch (err) {
+    console.warn('setupAdminOrdersListener error:', err);
   }
-};
+}
 
 async function loadAdminDataFromFirestore() {
   if (!window.fbDb || !window.fbFns) return;
@@ -3148,7 +3555,10 @@ async function loadAdminDataFromFirestore() {
         const data = d.data();
         fbOrders.push({
           id: data.orderId || d.id,
+          orderId: data.orderId || d.id,
+          userId: data.userId || '',
           date: data.date || 'Recent',
+          createdAt: data.createdAt || null,
           customerName: data.customerName || (data.customerEmail ? data.customerEmail.split('@')[0] : 'Customer'),
           customerEmail: data.customerEmail || '',
           customerPhone: data.customerPhone || '—',
@@ -3156,11 +3566,15 @@ async function loadAdminDataFromFirestore() {
           size: data.size || 'Standard',
           quantity: data.quantity || 1,
           amount: data.amount || data.price || '₹0',
+          price: data.price || data.amount || '₹0',
           status: data.orderStatus || data.status || 'Processing',
+          orderStatus: data.orderStatus || data.status || 'Processing',
+          customMessage: data.customMessage || '',
           paymentMethod: data.paymentMethod || 'Online',
           address: data.address || data.fullAddress || '—'
         });
       });
+      fbOrders.sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
       saveAdminOrders(fbOrders);
       if (currentAdminTab === 'orders') renderAdminOrders();
     }
@@ -3332,6 +3746,10 @@ const adminLogoutBtn = document.getElementById('adminLogoutBtn');
 if (adminLogoutBtn) {
   adminLogoutBtn.addEventListener('click', async () => {
     sessionStorage.removeItem('jayashree_admin_logged');
+    if (adminOrdersUnsubscribe) {
+      try { adminOrdersUnsubscribe(); } catch (e) {}
+      adminOrdersUnsubscribe = null;
+    }
     if (window.fbAuth && window.fbFns) {
       try { await window.fbFns.signOut(window.fbAuth); } catch (e) {}
     }

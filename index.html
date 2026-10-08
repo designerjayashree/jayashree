@@ -508,7 +508,19 @@
         <h2 class="auth-heading">Your Account</h2>
         <p class="auth-sub" id="authUserEmail">user@example.com</p>
         <div class="auth-user-status-pill">Active Customer</div>
-        <div class="auth-user-actions">
+
+        <!-- Customer "My Orders" Section -->
+        <div class="customer-my-orders-section" id="customerMyOrdersSection">
+          <div class="customer-my-orders-header">
+            <h3 class="customer-my-orders-title">My Orders</h3>
+            <span class="customer-my-orders-badge" id="customerOrdersCountBadge">0 Orders</span>
+          </div>
+          <div class="customer-my-orders-list" id="customerMyOrdersList">
+            <!-- Dynamically populated customer orders with newest on top -->
+          </div>
+        </div>
+
+        <div class="auth-user-actions" style="margin-top: 18px;">
           <button type="button" class="btn-card btn-card-primary" id="authSignOutBtn" style="width: 100%;">Sign Out</button>
         </div>
       </div>
