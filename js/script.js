@@ -2099,19 +2099,97 @@ function getExpectedDeliveryForOrder(order) {
   return formatDynamicDeliveryDateRange(pinCode, state, orderDate);
 }
 
+const ORDER_CANCELLATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 function isOrderCancellable(order) {
   if (!order) return false;
-  const status = (order.status || order.orderStatus || 'Processing').trim().toLowerCase();
-  const nonCancellable = ['shipped', 'out for delivery', 'delivered', 'cancelled'];
+  const status = (order.orderStatus || order.status || '').toLowerCase().trim();
+  const nonCancellable = ['cancelled', 'completed', 'delivered', 'shipped'];
   if (nonCancellable.includes(status)) {
     return false;
   }
   const createdMs = getOrderTimestamp(order);
   if (!createdMs) return false;
   const now = Date.now();
-  const diffMs = now - createdMs;
-  const twentyFourHoursMs = 24 * 60 * 60 * 1000;
-  return diffMs >= -60000 && diffMs <= twentyFourHoursMs;
+  const deadlineMs = createdMs + ORDER_CANCELLATION_WINDOW_MS;
+  return now < deadlineMs;
+}
+
+function formatRemainingCancellationTime(createdMs) {
+  const now = Date.now();
+  const deadlineMs = createdMs + ORDER_CANCELLATION_WINDOW_MS;
+  const remainingMs = deadlineMs - now;
+
+  if (remainingMs <= 0) {
+    return { expired: true, text: '00:00:00', remainingMs: 0 };
+  }
+
+  const totalSecs = Math.floor(remainingMs / 1000);
+  const hrs = Math.floor(totalSecs / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  const secs = totalSecs % 60;
+  const text = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+  return { expired: false, text, remainingMs };
+}
+
+let cancellationCountdownIntervalId = null;
+
+function updateCancellationCountdowns() {
+  const countdownEls = document.querySelectorAll('.my-order-countdown[data-created-at]');
+  if (!countdownEls || countdownEls.length === 0) {
+    stopCancellationCountdownTicker();
+    return;
+  }
+
+  countdownEls.forEach(el => {
+    const createdMs = Number(el.getAttribute('data-created-at'));
+    if (!createdMs || isNaN(createdMs)) return;
+
+    const res = formatRemainingCancellationTime(createdMs);
+    if (res.expired) {
+      const actionArea = el.closest('.my-order-action-area');
+      if (actionArea) {
+        actionArea.innerHTML = `
+          <div class="my-order-cancel-wrap">
+            <span class="my-order-period-ended">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <span>Cancellation period expired</span>
+            </span>
+          </div>
+        `;
+      }
+    } else {
+      const timerEl = el.querySelector('.my-order-countdown-timer');
+      if (timerEl && timerEl.textContent !== res.text) {
+        timerEl.textContent = res.text;
+      }
+    }
+  });
+
+  const remainingCountdowns = document.querySelectorAll('.my-order-countdown[data-created-at]');
+  if (!remainingCountdowns || remainingCountdowns.length === 0) {
+    stopCancellationCountdownTicker();
+  }
+}
+
+function startCancellationCountdownTicker() {
+  stopCancellationCountdownTicker();
+  const remainingCountdowns = document.querySelectorAll('.my-order-countdown[data-created-at]');
+  if (remainingCountdowns && remainingCountdowns.length > 0) {
+    updateCancellationCountdowns();
+    cancellationCountdownIntervalId = setInterval(updateCancellationCountdowns, 1000);
+  }
+}
+
+function stopCancellationCountdownTicker() {
+  if (cancellationCountdownIntervalId) {
+    clearInterval(cancellationCountdownIntervalId);
+    cancellationCountdownIntervalId = null;
+  }
 }
 
 async function executeCustomerOrderCancellation(orderId, btn) {
@@ -2154,7 +2232,7 @@ async function executeCustomerOrderCancellation(orderId, btn) {
 
   // 3. 24-Hour Rule Validation: Cannot cancel after 24 hours
   if (!isOrderCancellable(order)) {
-    alert('This order cannot be cancelled as the 24-hour cancellation period has ended.');
+    alert('This order cannot be cancelled as the 24-hour cancellation period has expired.');
     renderCustomerOrdersList(currentCustomerOrders);
     return;
   }
@@ -2382,6 +2460,7 @@ function attachHoldToCancelListeners(container) {
 }
 
 function renderCustomerOrdersList(orders) {
+  stopCancellationCountdownTicker();
   if (Array.isArray(orders)) {
     currentCustomerOrders = orders;
   }
@@ -2452,9 +2531,14 @@ function renderCustomerOrdersList(orders) {
       // Delivered order cannot be cancelled
       footerHtml = '';
     } else if (cancellable) {
-      // Within 24 hours: Hold to Cancel button (Reference HoldButton pattern)
+      // Within 24 hours: Hold to Cancel button with live cancellation countdown
+      const countdown = formatRemainingCancellationTime(createdMs);
       footerHtml = `
         <div class="my-order-cancel-wrap">
+          <div class="my-order-countdown" data-order-id="${escapeHtml(orderDocId)}" data-created-at="${createdMs}">
+            <span class="my-order-countdown-label">Time left to cancel:</span>
+            <span class="my-order-countdown-timer">${escapeHtml(countdown.text)}</span>
+          </div>
           <button type="button" class="my-order-hold-cancel-btn" data-order-id="${escapeHtml(orderDocId)}" aria-label="Hold to Cancel">
             <span class="hold-progress-fill" aria-hidden="true"></span>
             <span class="hold-btn-content">
@@ -2466,11 +2550,10 @@ function renderCustomerOrdersList(orders) {
               <span class="hold-btn-text">Hold to Cancel</span>
             </span>
           </button>
-          <span class="my-order-cancel-hint">Hold for 2s to cancel</span>
         </div>
       `;
     } else {
-      // After 24 hours: Replace cancellation button with "Cancellation period ended"
+      // After 24 hours: Replace cancellation button with "Cancellation period expired"
       footerHtml = `
         <div class="my-order-cancel-wrap">
           <span class="my-order-period-ended">
@@ -2478,7 +2561,7 @@ function renderCustomerOrdersList(orders) {
               <circle cx="12" cy="12" r="10"/>
               <polyline points="12 6 12 12 16 14"/>
             </svg>
-            <span>Cancellation period ended</span>
+            <span>Cancellation period expired</span>
           </span>
         </div>
       `;
@@ -2603,6 +2686,7 @@ function renderCustomerOrdersList(orders) {
 
   // Attach hold to cancel interaction to rendered buttons
   attachHoldToCancelListeners(listEl);
+  startCancellationCountdownTicker();
 }
 
 let customerOrdersUnsubscribe = null;
@@ -2865,6 +2949,7 @@ function openAuthModal(mode = 'login', fromBuyNow = false) {
 }
 
 function closeAuthModal() {
+  stopCancellationCountdownTicker();
   if (!authModalOverlay) return;
   authModalOverlay.classList.remove('open');
   const authModalEl = document.querySelector('.auth-modal');
@@ -3348,6 +3433,10 @@ window.formatOrderDisplayDate = formatOrderDisplayDate;
 window.formatOrderSimpleDate = formatOrderSimpleDate;
 window.getExpectedDeliveryForOrder = getExpectedDeliveryForOrder;
 window.isOrderCancellable = isOrderCancellable;
+window.formatRemainingCancellationTime = formatRemainingCancellationTime;
+window.startCancellationCountdownTicker = startCancellationCountdownTicker;
+window.stopCancellationCountdownTicker = stopCancellationCountdownTicker;
+window.updateCancellationCountdowns = updateCancellationCountdowns;
 window.handleCustomerCancelOrder = handleCustomerCancelOrder;
 window.renderCustomerOrdersList = renderCustomerOrdersList;
 window.attachHoldToCancelListeners = attachHoldToCancelListeners;

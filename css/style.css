@@ -2691,14 +2691,12 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   font-weight: 600;
 }
 
-/* Fixed action area: holds button or cancellation notice with constant height */
+/* Action area: holds countdown, button or cancellation notice */
 .my-order-action-area {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 34px;
   min-height: 34px;
-  max-height: 34px;
   margin-top: 10px;
   width: 100%;
   box-sizing: border-box;
@@ -2753,13 +2751,66 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  height: 34px;
   min-height: 34px;
-  max-height: 34px;
   gap: 10px;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  flex-wrap: wrap;
+}
+
+/* 24-Hour Cancellation Countdown */
+.my-order-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--charcoal);
+  white-space: nowrap;
+}
+
+.my-order-countdown-label {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+}
+
+.my-order-countdown-timer {
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #B91C1C;
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  padding: 2px 7px;
+  border-radius: 6px;
+  letter-spacing: 0.4px;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+}
+
+@media (max-width: 360px) {
+  .my-order-cancel-wrap {
+    gap: 8px;
+  }
+  .my-order-countdown {
+    font-size: 11px;
+    gap: 5px;
+  }
+  .my-order-countdown-label {
+    font-size: 11px;
+  }
+  .my-order-countdown-timer {
+    font-size: 11.5px;
+    padding: 2px 5px;
+  }
+  .my-order-hold-cancel-btn {
+    height: 30px;
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 11px;
+  }
 }
 
 /* Hold to Cancel Button (Reference Component HoldButton behaviour) */
