@@ -822,6 +822,75 @@
       </div>
     </div>
   </div>
+  <!-- Jayashree Rule-Based Fashion Chatbot -->
+  <button type="button" class="chatbot-launcher-btn" id="chatbotLauncherBtn" aria-label="Open fashion assistance chat" title="Chat with Jayashree Assistant">
+    <svg class="chatbot-icon-msg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+    </svg>
+    <svg class="chatbot-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>
+    <span class="chatbot-launcher-text">Ask Jayashree</span>
+  </button>
+
+  <div class="chatbot-drawer" id="chatbotDrawer" role="dialog" aria-modal="true" aria-labelledby="chatbotHeading" style="display: none;">
+    <div class="chatbot-header">
+      <div class="chatbot-brand-wrap">
+        <div class="chatbot-avatar">
+          <img src="Homepage Images/chatbot-avatar.webp" alt="Jayashree Assistant" class="chatbot-avatar-img" />
+        </div>
+        <div class="chatbot-header-info">
+          <h3 class="chatbot-title" id="chatbotHeading">Jayashree Assistant</h3>
+          <span class="chatbot-status-badge"><span class="status-dot"></span> Customer Support</span>
+        </div>
+      </div>
+      <button type="button" class="chatbot-close-btn" id="chatbotCloseBtn" aria-label="Close chatbot window">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
+    <div class="chatbot-body" id="chatbotBody">
+      <div class="chatbot-messages" id="chatbotMessages">
+        <!-- Initial Welcome Message from Jayashree Bot -->
+        <div class="chat-msg bot-msg">
+          <div class="chat-msg-bubble">
+            <p>Welcome to <strong>Jayashree</strong>! 👋</p>
+            <p>I am your fashion catalogue assistant. I can help you with our collections, product prices, sizes, customisation process, and store policies.</p>
+          </div>
+        </div>
+
+        <!-- Suggested Quick Question Chips -->
+        <div class="chatbot-chips-wrap">
+          <div class="chatbot-chips-title">Suggested questions:</div>
+          <div class="chatbot-chips" id="chatbotChips">
+            <button type="button" class="chat-chip" data-question="What bridal lehengas do you have?">👗 Bridal Lehengas</button>
+            <button type="button" class="chat-chip" data-question="What are your product prices?">💰 Product Prices</button>
+            <button type="button" class="chat-chip" data-question="What sizes are available?">📏 Available Sizes</button>
+            <button type="button" class="chat-chip" data-question="How does outfit customisation work?">🧵 Customisation</button>
+            <button type="button" class="chat-chip" data-question="What is your cancellation policy?">⏱️ Cancellation Policy</button>
+            <button type="button" class="chat-chip" data-question="Do you accept cash on delivery?">💳 Payment & COD</button>
+            <button type="button" class="chat-chip" data-question="When will my order be delivered?">🚚 Delivery Time</button>
+            <button type="button" class="chat-chip" data-question="How can I contact Jayashree?">📞 Contact & Instagram</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <form class="chatbot-input-bar" id="chatbotForm">
+      <input type="text" id="chatbotInput" class="chatbot-input" placeholder="Ask about designs, prices, sizes..." maxlength="300" autocomplete="off" />
+      <button type="submit" id="chatbotSendBtn" class="chatbot-send-btn" aria-label="Send message">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="22" y1="2" x2="11" y2="13"></line>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+        </svg>
+      </button>
+    </form>
+  </div>
+
   <!-- External JavaScript Module -->
   <script type="module" src="/js/script.js"></script>
 </body>

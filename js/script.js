@@ -1,4 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { evaluateRuleChatbot, resetConversationState } from "./ruleChatbot.js";
 import { 
   getFirestore, collection, addDoc, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, 
   serverTimestamp, query, where, orderBy, onSnapshot, writeBatch 
@@ -5346,3 +5347,201 @@ if (!location.hash) {
   location.hash = '#/';
 }
 navigate();
+
+// ==========================================================================
+// JAYASHREE RULE-BASED FASHION CHATBOT INITIALIZATION
+// ==========================================================================
+function initJayashreeChatbot() {
+  const launcherBtn = document.getElementById('chatbotLauncherBtn');
+  const drawer = document.getElementById('chatbotDrawer');
+  const closeBtn = document.getElementById('chatbotCloseBtn');
+  const form = document.getElementById('chatbotForm');
+  const input = document.getElementById('chatbotInput');
+  const messagesContainer = document.getElementById('chatbotMessages');
+  const chipsContainer = document.getElementById('chatbotChips');
+  const msgIcon = launcherBtn?.querySelector('.chatbot-icon-msg');
+  const closeIcon = launcherBtn?.querySelector('.chatbot-icon-close');
+
+  if (!launcherBtn || !drawer || !form || !input || !messagesContainer) {
+    return;
+  }
+
+  let isOpen = false;
+
+  function toggleChatbot(forceState) {
+    isOpen = typeof forceState === 'boolean' ? forceState : !isOpen;
+    if (isOpen) {
+      drawer.style.display = 'flex';
+      if (msgIcon) msgIcon.style.display = 'none';
+      if (closeIcon) closeIcon.style.display = 'block';
+      launcherBtn.setAttribute('aria-expanded', 'true');
+      input.focus();
+      scrollChatToBottom();
+    } else {
+      drawer.style.display = 'none';
+      if (msgIcon) msgIcon.style.display = 'block';
+      if (closeIcon) closeIcon.style.display = 'none';
+      launcherBtn.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  function scrollChatToBottom() {
+    setTimeout(() => {
+      const body = document.getElementById('chatbotBody');
+      if (body) {
+        body.scrollTop = body.scrollHeight;
+      }
+    }, 20);
+  }
+
+  function scrollChatToLatestExchange(userMsgEl, botMsgEl) {
+    const body = document.getElementById('chatbotBody');
+    if (!body) return;
+
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        if (userMsgEl && botMsgEl) {
+          const bodyRect = body.getBoundingClientRect();
+          const userRect = userMsgEl.getBoundingClientRect();
+          const botRect = botMsgEl.getBoundingClientRect();
+
+          const userAbsoluteTop = userRect.top - bodyRect.top + body.scrollTop;
+          const botAbsoluteBottom = botRect.bottom - bodyRect.top + body.scrollTop;
+          const exchangeHeight = botAbsoluteBottom - userAbsoluteTop;
+          const viewportHeight = body.clientHeight;
+
+          if (exchangeHeight <= viewportHeight) {
+            // Both customer question and bot reply fit inside visible height
+            body.scrollTop = Math.max(0, userAbsoluteTop - 10);
+          } else {
+            // Exchange is taller than viewport: position customer question near top
+            // so customer reads from the start of the reply without scrolling up
+            body.scrollTop = Math.max(0, userAbsoluteTop - 10);
+          }
+        } else if (botMsgEl) {
+          const bodyRect = body.getBoundingClientRect();
+          const botRect = botMsgEl.getBoundingClientRect();
+          const botAbsoluteTop = botRect.top - bodyRect.top + body.scrollTop;
+          body.scrollTop = Math.max(0, botAbsoluteTop - 10);
+        } else {
+          body.scrollTop = body.scrollHeight;
+        }
+      }, 30);
+    });
+  }
+
+  function formatBotText(text) {
+    if (!text) return '';
+    // Format bold **text** -> <strong>text</strong>
+    let html = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Format [label](url) -> internal hash link or external target="_blank"
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) => {
+      if (href.startsWith('#')) {
+        return `<a href="${href}" class="chat-link chat-link-hash">${label}</a>`;
+      }
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="chat-link">${label}</a>`;
+    });
+    // Format markdown code `code` -> <code>code</code>
+    html = html.replace(/`([^`]+)`/g, '<span style="font-family: monospace; background: rgba(0,0,0,0.06); padding: 1px 4px; border-radius: 4px;">$1</span>');
+    // Split into paragraphs / lines
+    const paragraphs = html.split('\n\n').filter(Boolean);
+    return paragraphs.map(para => {
+      const lines = para.split('\n');
+      const listItems = lines.filter(l => l.trim().startsWith('•') || /^\d+\./.test(l.trim()));
+      if (listItems.length > 0 && listItems.length === lines.length) {
+        return `<ul style="margin: 4px 0 6px 16px; padding: 0;">` +
+          lines.map(l => `<li>${l.replace(/^[•\d\.]+\s*/, '')}</li>`).join('') +
+          `</ul>`;
+      }
+      return `<p style="margin: 0 0 6px;">${lines.join('<br>')}</p>`;
+    }).join('');
+  }
+
+  function appendMessage(sender, text) {
+    const msgEl = document.createElement('div');
+    msgEl.className = `chat-msg ${sender === 'user' ? 'user-msg' : 'bot-msg'}`;
+    const bubbleEl = document.createElement('div');
+    bubbleEl.className = 'chat-msg-bubble';
+
+    if (sender === 'user') {
+      const p = document.createElement('p');
+      p.textContent = text;
+      bubbleEl.appendChild(p);
+    } else {
+      bubbleEl.innerHTML = formatBotText(text);
+    }
+
+    msgEl.appendChild(bubbleEl);
+    messagesContainer.appendChild(msgEl);
+    if (sender === 'user') {
+      scrollChatToBottom();
+    }
+    return msgEl;
+  }
+
+  function handleUserInput(questionText) {
+    const q = (questionText || input.value || '').trim();
+    if (!q) return;
+
+    const userMsgEl = appendMessage('user', q);
+    input.value = '';
+
+    // Evaluate rule-based response instantly (zero network latency)
+    try {
+      const evaluation = evaluateRuleChatbot(q);
+      setTimeout(() => {
+        const botMsgEl = appendMessage('bot', evaluation.answer);
+        scrollChatToLatestExchange(userMsgEl, botMsgEl);
+      }, 80);
+    } catch (err) {
+      console.error('Chatbot rule evaluation error:', err);
+      setTimeout(() => {
+        const botMsgEl = appendMessage('bot', "I'm sorry, that information isn't available on our website. Please contact the Jayashree team for assistance.");
+        scrollChatToLatestExchange(userMsgEl, botMsgEl);
+      }, 80);
+    }
+  }
+
+  launcherBtn.addEventListener('click', () => toggleChatbot());
+  closeBtn?.addEventListener('click', () => toggleChatbot(false));
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    handleUserInput();
+  });
+
+  chipsContainer?.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chat-chip');
+    if (chip) {
+      const q = chip.getAttribute('data-question');
+      if (q) {
+        handleUserInput(q);
+      }
+    }
+  });
+
+  // Auto-minimize chatbot on mobile when customer navigates to internal page (e.g. Help Centre)
+  messagesContainer.addEventListener('click', (e) => {
+    const hashLink = e.target.closest('.chat-link-hash');
+    if (hashLink) {
+      if (window.innerWidth <= 768) {
+        toggleChatbot(false);
+      }
+    }
+  });
+
+  // Close on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isOpen) {
+      toggleChatbot(false);
+    }
+  });
+
+  // Expose for verification and testing
+  window.askJayashreeBot = evaluateRuleChatbot;
+  window.resetJayashreeChatbotState = resetConversationState;
+  window.toggleJayashreeChatbot = toggleChatbot;
+}
+
+initJayashreeChatbot();
+
