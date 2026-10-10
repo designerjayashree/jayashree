@@ -2697,7 +2697,7 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   align-items: center;
   justify-content: space-between;
   min-height: 34px;
-  margin-top: 10px;
+  margin: 0;
   width: 100%;
   box-sizing: border-box;
 }
@@ -2714,27 +2714,14 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   box-sizing: border-box;
 }
 
-/* Fixed-height bottom section: delivery date or reserved placeholder */
-.my-order-bottom-section {
-  min-height: 20px;
-  height: 20px;
-  max-height: 20px;
+/* Estimated delivery item row */
+.my-order-delivery-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-.my-order-delivery-item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  width: 100%;
   font-size: 12.5px;
-  line-height: 20px;
+  line-height: 1.4;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -2746,89 +2733,182 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   visibility: hidden;
 }
 
+/* Dedicated payment details row */
+.my-order-payment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 12.5px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  gap: 12px;
+}
+
+.my-order-payment-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.my-order-payment-method {
+  font-weight: 600;
+  color: var(--charcoal);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+@media (max-width: 360px) {
+  .my-order-payment-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .my-order-payment-details {
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
 .my-order-cancel-wrap {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
   min-height: 34px;
-  gap: 10px;
+  gap: 14px;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  flex-wrap: wrap;
+}
+
+/* Blush-pink panel matching reference image */
+.my-order-cancel-panel {
+  background: #FCF1F1;
+  border: 1px solid #F6DFDF;
+  border-radius: 14px;
+  padding: 11px 14px;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(185, 28, 28, 0.03);
+}
+
+.my-order-cancel-main {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Pale circular clock icon badge */
+.my-order-cancel-clock-badge {
+  width: 35px;
+  height: 35px;
+  min-width: 35px;
+  border-radius: 50%;
+  background: #F9DADA;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.my-order-cancel-clock-icon {
+  color: #B91C1C;
+  width: 17px;
+  height: 17px;
+  display: block;
+}
+
+/* Text block inside panel */
+.my-order-cancel-text-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.my-order-cancel-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #5A473D;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 /* 24-Hour Cancellation Countdown */
 .my-order-countdown {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
+  gap: 7px;
+  font-size: 12px;
   color: var(--charcoal);
   white-space: nowrap;
 }
 
-.my-order-countdown-label {
-  color: var(--muted);
-  font-weight: 500;
-  font-size: 11.5px;
-  letter-spacing: 0.01em;
+.my-order-cancel-panel .my-order-countdown {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  margin: 1px 0;
+  line-height: 1.1;
 }
 
+/* Live countdown: bold dark-red monospaced digits */
 .my-order-countdown-timer {
   font-family: 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
-  font-weight: 700;
-  color: #B91C1C;
-  background: #FEF2F2;
-  border: 1px solid #FECACA;
-  padding: 2px 7px;
-  border-radius: 6px;
-  letter-spacing: 0.4px;
+  font-size: 20px;
+  font-weight: 800;
+  color: #7A0C0C;
+  letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.15;
+  white-space: nowrap;
 }
 
-@media (max-width: 360px) {
-  .my-order-cancel-wrap {
-    gap: 8px;
-  }
-  .my-order-countdown {
-    font-size: 11px;
-    gap: 5px;
-  }
-  .my-order-countdown-label {
-    font-size: 11px;
-  }
-  .my-order-countdown-timer {
-    font-size: 11.5px;
-    padding: 2px 5px;
-  }
-  .my-order-hold-cancel-btn {
-    height: 30px;
-    min-height: 30px;
-    padding: 0 12px;
-    font-size: 11px;
-  }
+/* Helper policy text */
+.my-order-cancel-policy-hint {
+  font-size: 10px;
+  color: #6E5C50;
+  line-height: 1.35;
+  margin: 0;
+  padding: 0;
 }
 
-/* Hold to Cancel Button (Reference Component HoldButton behaviour) */
+/* Vertical Divider separating timer from button */
+.my-order-cancel-divider {
+  width: 1px;
+  height: 42px;
+  background-color: #E8D0D0;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+/* Refined Outlined "Hold to Cancel" Button */
 .my-order-hold-cancel-btn {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 32px;
-  min-height: 32px;
-  max-height: 32px;
-  padding: 0 16px;
+  height: 35px;
+  min-height: 35px;
+  max-height: 35px;
+  padding: 0 13px;
   background: #FFFFFF;
-  border: 1.5px solid #F87171;
-  color: #B91C1C;
+  border: 1.5px solid #D63939;
+  color: #7A0C0C;
   border-radius: 999px;
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   overflow: hidden;
@@ -2836,27 +2916,37 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   touch-action: manipulation;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease, color 0.2s ease;
-  box-shadow: 0 1px 2px rgba(220, 38, 38, 0.08);
+  transition: all 0.18s ease;
+  box-shadow: 0 1px 2px rgba(214, 57, 57, 0.06);
   box-sizing: border-box;
   transform: none !important;
   margin: 0;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .my-order-hold-cancel-btn:hover:not(:disabled) {
   background: #FFF5F5;
-  border-color: #EF4444;
-  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.14);
-}
-
-.my-order-hold-cancel-btn:active:not(:disabled) {
-  transform: none !important;
+  border-color: #B91C1C;
+  color: #660A0A;
+  box-shadow: 0 2px 6px rgba(185, 28, 28, 0.12);
 }
 
 .my-order-hold-cancel-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.35);
+  box-shadow: 0 0 0 3px rgba(214, 57, 57, 0.25);
+}
+
+/* Disabled Hold Button when Expired */
+.my-order-hold-cancel-btn:disabled,
+.my-order-hold-cancel-btn.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  border-color: #E2CECE;
+  color: #9C8989;
+  background: #FDF7F7;
+  box-shadow: none;
 }
 
 /* Progress Fill Bar inside Button */
@@ -2866,21 +2956,21 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   left: 0;
   bottom: 0;
   width: 0%;
-  background: linear-gradient(90deg, rgba(254, 202, 202, 0.95) 0%, rgba(248, 113, 113, 0.85) 100%);
+  background: linear-gradient(90deg, rgba(254, 202, 202, 0.95) 0%, rgba(248, 113, 113, 0.9) 100%);
   pointer-events: none;
   z-index: 1;
   transition: width 0.24s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* While holding: never push or resize anything */
+/* While holding */
 .my-order-hold-cancel-btn.is-holding {
-  border-color: #DC2626;
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25), 0 2px 8px rgba(220, 38, 38, 0.2);
+  border-color: #881313;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2), 0 2px 8px rgba(185, 28, 28, 0.15);
   transform: none !important;
 }
 
 .my-order-hold-cancel-btn.is-holding .hold-btn-content {
-  color: #7F1D1D;
+  color: #660A0A;
 }
 
 /* Button Content & Label */
@@ -2889,22 +2979,52 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   pointer-events: none;
-  transition: color 0.2s ease;
+  transition: color 0.18s ease;
 }
 
 .my-order-hold-cancel-btn .hold-btn-icon {
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
-.my-order-cancel-hint {
-  font-size: 11px;
-  color: var(--muted);
-  white-space: nowrap;
+.my-order-hold-cancel-btn .hold-btn-text {
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-/* Cancellation Period Ended Badge */
+/* Cancellation Period Ended Badge & Expired Panel */
+.my-order-cancel-panel.is-expired {
+  background: #FBF4F4;
+  border-color: #EFE0E0;
+}
+
+.my-order-cancel-panel.is-expired .my-order-cancel-clock-badge {
+  background: #EFE4E4;
+}
+
+.my-order-cancel-panel.is-expired .my-order-cancel-clock-icon {
+  color: #8E7A7A;
+}
+
+.my-order-cancel-panel .my-order-period-ended {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7A6969;
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+  height: auto;
+  min-height: 0;
+  line-height: 1.2;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+}
+
 .my-order-period-ended {
   display: inline-flex;
   align-items: center;
@@ -2914,10 +3034,10 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   color: #64748B;
   background: #F1F5F9;
   border: 1px solid #E2E8F0;
-  padding: 0 12px;
-  height: 32px;
-  min-height: 32px;
-  max-height: 32px;
+  padding: 3px 10px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   border-radius: 999px;
   box-sizing: border-box;
   white-space: nowrap;
@@ -2926,6 +3046,41 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
 .my-order-period-ended svg {
   color: #94A3B8;
   flex-shrink: 0;
+}
+
+/* Mobile Responsiveness: Stack cleanly on smaller screens */
+@media (max-width: 520px) {
+  .my-order-cancel-panel {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px 14px;
+    gap: 12px;
+  }
+  .my-order-cancel-main {
+    gap: 11px;
+    width: 100%;
+  }
+  .my-order-cancel-clock-badge {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+  }
+  .my-order-cancel-clock-icon {
+    width: 17px;
+    height: 17px;
+  }
+  .my-order-cancel-panel .my-order-countdown-timer {
+    font-size: 20px;
+  }
+  .my-order-cancel-divider {
+    display: none;
+  }
+  .my-order-hold-cancel-btn {
+    width: 100%;
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+  }
 }
 
 /* Cancelled Order Notice (Attribution: "Cancelled by you" or "Cancelled by Jayashree") */
@@ -3463,6 +3618,113 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   font-size: 16px;
   color: var(--espresso);
 }
+/* Checkout Payment Selection */
+.checkout-payment-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.checkout-payment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.checkout-payment-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--espresso);
+}
+
+.checkout-payment-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 520px) {
+  .checkout-payment-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+.checkout-payment-card {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  background: #FAF8F5;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.checkout-payment-card:hover {
+  background: #FFFFFF;
+  border-color: #D6C7B7;
+}
+
+.checkout-payment-card.active {
+  background: #FFFFFF;
+  border-color: var(--espresso);
+  box-shadow: 0 2px 8px rgba(47, 41, 36, 0.06);
+}
+
+.checkout-payment-radio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.checkout-payment-card-content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 3px;
+}
+
+.checkout-payment-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.checkout-payment-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--espresso);
+}
+
+.checkout-payment-custom-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #C4B5A5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.18s ease;
+}
+
+.checkout-payment-card.active .checkout-payment-custom-radio {
+  border-color: var(--espresso);
+  background: var(--espresso);
+  box-shadow: inset 0 0 0 3px #FFFFFF;
+}
+
+.checkout-payment-desc {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.35;
+}
 
 .checkout-submit-btn {
   width: 100%;
@@ -3869,17 +4131,18 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   border-collapse: separate;
   border-spacing: 0;
   font-size: 13px;
-  min-width: 820px;
+  min-width: 900px;
 }
 
 /* Precise, visually balanced column proportions (Total = 100%) */
-.admin-table .col-order-cust   { width: 25%; }
-.admin-table .col-product-size { width: 21%; }
-.admin-table .col-qty          { width: 6%; }
-.admin-table .col-amount       { width: 11%; }
-.admin-table .col-date         { width: 11%; }
-.admin-table .col-status       { width: 18%; }
-.admin-table .col-action       { width: 8%; }
+.admin-table .col-order-cust   { width: 21%; }
+.admin-table .col-product-size { width: 17%; }
+.admin-table .col-qty          { width: 5%; }
+.admin-table .col-amount       { width: 10%; }
+.admin-table .col-payment      { width: 15%; }
+.admin-table .col-date         { width: 10%; }
+.admin-table .col-status       { width: 11%; }
+.admin-table .col-action       { width: 11%; min-width: 95px; }
 
 .admin-table th {
   text-align: left;
@@ -3892,6 +4155,16 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   background: #FAF7F2;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+}
+
+.admin-table th:first-child,
+.admin-table td:first-child {
+  padding-left: 20px;
+}
+
+.admin-table th:last-child,
+.admin-table td:last-child {
+  padding-right: 20px;
 }
 
 .admin-table th.th-center,
@@ -4030,7 +4303,71 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   font-size: 14px;
 }
 
-/* 5. Date Column */
+/* 5. Payment Method Column */
+.admin-td-payment {
+  vertical-align: middle;
+}
+
+.admin-payment-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.admin-payment-method-name {
+  font-weight: 600;
+  color: var(--charcoal);
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+
+.admin-payment-not-recorded {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 12px;
+}
+
+/* Payment Status Pills - Shared (Admin & Customer Account) */
+.payment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2.5px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.payment-badge-paid {
+  background: #EEF8F1;
+  color: #15803D;
+  border: 1px solid #BBF7D0;
+}
+
+.payment-badge-pending {
+  background: #FEF7EC;
+  color: #B45309;
+  border: 1px solid #FDE68A;
+}
+
+.payment-badge-failed {
+  background: #FEF2F2;
+  color: #B91C1C;
+  border: 1px solid #FECACA;
+}
+
+.payment-badge-not-recorded {
+  background: #F3F4F6;
+  color: #6B7280;
+  border: 1px solid #E5E7EB;
+}
+
+
+/* 6. Date Column */
 .admin-td-date {
   white-space: nowrap;
   vertical-align: middle;
@@ -4729,9 +5066,9 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .admin-modal-header h3 {
@@ -5016,6 +5353,195 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   }
   .admin-modal-card {
     padding: 20px 16px;
+  }
+}
+
+/* ==========================================
+   ADMIN HELP REPLY MODAL & BUTTONS
+   ========================================== */
+.admin-card-btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-reply-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: #4A382A;
+  border: 1px solid #4A382A;
+  color: #FFFFFF;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.admin-reply-btn:hover {
+  background: #2E2219;
+  border-color: #2E2219;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(74, 56, 42, 0.2);
+}
+
+.admin-reply-modal-card {
+  max-width: 540px;
+  padding: 24px 28px 28px;
+}
+
+.admin-reply-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.admin-reply-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.admin-reply-field label {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.admin-reply-req {
+  color: #C5221F;
+}
+
+.admin-reply-input,
+.admin-reply-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--charcoal);
+  background: #FFFFFF;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-reply-input:focus,
+.admin-reply-textarea:focus {
+  outline: none;
+  border-color: #4A382A;
+  box-shadow: 0 0 0 3px rgba(74, 56, 42, 0.1);
+}
+
+.admin-reply-textarea {
+  resize: vertical;
+  min-height: 120px;
+  line-height: 1.5;
+}
+
+.admin-reply-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #F4EFE6;
+  border: 1px solid #E5D9C5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #5C4B3C;
+  line-height: 1.45;
+}
+
+.admin-reply-notice-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #8C6D4F;
+}
+
+.admin-reply-feedback {
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.admin-reply-feedback.error {
+  background: #FDF2F2;
+  border: 1px solid #F8B4B4;
+  color: #9B1C1C;
+}
+
+.admin-reply-feedback.success {
+  background: #EDF7ED;
+  border: 1px solid #C8E6C9;
+  color: #1E4620;
+}
+
+.admin-reply-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.admin-reply-cancel-btn {
+  padding: 9px 16px;
+  border-radius: 8px;
+  background: #FAF7F2;
+  border: 1px solid var(--border);
+  color: var(--charcoal);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.admin-reply-cancel-btn:hover {
+  background: #EFE9DF;
+  color: #000000;
+}
+
+.admin-reply-gmail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 8px;
+  background: #EA4335;
+  border: 1px solid #D93025;
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(234, 67, 53, 0.25);
+}
+
+.admin-reply-gmail-btn:hover {
+  background: #D93025;
+  border-color: #B31412;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(234, 67, 53, 0.35);
+}
+
+@media (max-width: 480px) {
+  .admin-reply-modal-card {
+    padding: 20px 16px;
+  }
+  .admin-reply-actions {
+    flex-direction: column-reverse;
+  }
+  .admin-reply-actions button {
+    width: 100%;
+    justify-content: center;
   }
 }
 
@@ -5795,10 +6321,10 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   z-index: 990;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   background: var(--espresso);
   color: var(--ivory);
-  padding: 12px 18px;
+  padding: 7px 18px 7px 8px;
   border-radius: 999px;
   border: 1px solid var(--sand);
   box-shadow: 0 10px 26px rgba(74, 56, 42, 0.28);
@@ -5819,6 +6345,15 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   width: 18px;
   height: 18px;
   flex-shrink: 0;
+}
+
+.chatbot-launcher-robo {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
 }
 
 .chatbot-drawer {
@@ -6025,6 +6560,32 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   box-shadow: 0 2px 6px rgba(74, 56, 42, 0.15);
 }
 
+.chat-typing-bubble {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 14px;
+  min-height: 38px;
+}
+
+.chat-typing-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--chocolate);
+  border-radius: 50%;
+  display: inline-block;
+  animation: chatTypingBounce 1.4s infinite ease-in-out both;
+}
+
+.chat-typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.chat-typing-dot:nth-child(2) { animation-delay: -0.16s; }
+.chat-typing-dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes chatTypingBounce {
+  0%, 80%, 100% { transform: scale(0.4); opacity: 0.3; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
 .chatbot-chips-wrap {
   padding-top: 4px;
   margin-top: 6px;
@@ -6124,11 +6685,24 @@ body.popup-open > *:not(.auth-modal-overlay):not(.checkout-modal-overlay):not(.a
   .chatbot-launcher-btn {
     bottom: 20px;
     right: 20px;
-    padding: 12px;
+    width: 56px;
+    height: 56px;
+    padding: 0;
     border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .chatbot-launcher-text {
     display: none;
+  }
+  .chatbot-launcher-robo {
+    width: 48px;
+    height: 48px;
+  }
+  .chatbot-launcher-btn svg {
+    width: 22px;
+    height: 22px;
   }
   .chatbot-drawer {
     bottom: 0;

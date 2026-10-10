@@ -416,7 +416,7 @@ export function evaluateRuleChatbot(userInput) {
   const adminProbeRegex = /\b(?:admin\s+(?:dashboard|panel|portal|login|screen|view|credentials?|passwords?|access|records?|data|table|console|privileges?|token|secret|system|orders?|account|role|override|auth)|dashboard)\b/i;
 
   // Probes for other customers' data, orders database dumps, or backend injection attacks
-  const privateDataProbeRegex = /\b(?:another\s+customer|other\s+customer|someone\s+else|all\s+orders|customer\s+data|customer\s+phone|customer\s+email|customer\s+address|customer\s+records?|user\s+list|users\s+collection|orders\s+collection|all\s+users|\borders\b.*?\b(?:from|where|status|table|list)|select\b.*?\bfrom|insert\b.*?\binto|update\b.*?\bset|delete\b.*?\bfrom|drop\b\s+table|where\b\s+\w+\s*=|passwords?|secrets?|credentials?|firebase|firestore|database|databases|revenue|profit|tokens?|env|private\s+key|api\s+keys?|hack|bypass|system\s+prompt|roleplay|ignore\s+all|override)\b/i;
+  const privateDataProbeRegex = /\b(?:another\s+customers?|other\s+customers?|someone\s+else|all\s+orders|customer\s+data|customers?\s+data|customer\s+phones?|customers?\s+phones?|customer\s+emails?|customers?\s+emails?|customers?\s+orders?|customer\s+address|customers?\s+address|customer\s+records?|user\s+list|users\s+collection|orders\s+collection|all\s+users|\borders\b.*?\b(?:from|where|status|table|list)|select\b.*?\bfrom|insert\b.*?\binto|update\b.*?\bset|delete\b.*?\bfrom|drop\b\s+table|where\b\s+\w+\s*=|passwords?|secrets?|credentials?|firebase|firestore|database|databases|revenue|profit|tokens?|env|private\s+key|api\s+keys?|hack|bypass|system\s+prompt|roleplay|ignore\s+all|override)\b/i;
 
   // Block unauthorized admin probes that are not support inquiries (e.g. "admin", "show admin", etc.)
   const isUnauthorizedAdminProbe = /\badmin\b/i.test(raw) && !isAdminSupportInquiry;
@@ -565,11 +565,13 @@ export function evaluateRuleChatbot(userInput) {
     };
   }
 
-  // D. Order assistance or order problem
-  if (/\b(?:issue|problem|help|assistance|complaint|delay\w*|status|trouble)\b.*?\b(?:order|delivery|shipment|package)\b/i.test(normalized) ||
+  // D. Order assistance, order tracking, or order problem
+  if (/\b(?:where\s+is|track|status\s+of)\b.*?\b(?:order|delivery|package)\b/i.test(normalized) ||
+      /\b(?:order|delivery|package)\s+status\b/i.test(normalized) ||
+      /\b(?:issue|problem|help|assistance|complaint|delay\w*|status|trouble)\b.*?\b(?:order|delivery|shipment|package)\b/i.test(normalized) ||
       /\b(?:order|delivery|package)\b.*?\b(?:issue|problem|complaint|delayed|wrong|damaged|missing|help|assistance)\b/i.test(normalized)) {
     return {
-      answer: "For issues with an existing order, please visit our [Help Centre](#/help) and submit your request, or contact us via WhatsApp/call at +91 9177976293 with your order details. You can also view your order status in Your Account → My Orders.",
+      answer: "To check the status of your order, please visit [Your Account → My Orders](#/account). For any issues or tracking support, you can also submit a request in our [Help Centre](#/help) or contact us via WhatsApp/call at +91 9177976293.",
       intent: "order_issue_support",
       suggestedChips: ["Help Centre", "Cancellation Policy", "Delivery Information"]
     };
@@ -834,6 +836,72 @@ export function evaluateRuleChatbot(userInput) {
         intent: "main_collections"
       };
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // RULE 8.5: DETERMINISTIC PRICE EXTREMES & COMPARISONS
+  // Answers "Which outfit is the cheapest?", "Which outfit is the most expensive?",
+  // "Which outfit is more costly?", and pairwise price comparisons
+  // --------------------------------------------------------------------------
+  if (/\b(?:cheapest|lowest\s+price|least\s+expensive|minimum\s+price|most\s+affordable|lowest\s+cost)\b/i.test(normalized)) {
+    if (normalized.includes('kid') || normalized.includes('child')) {
+      return {
+        answer: "Kids' Casual Dresses are our cheapest kids' outfit starting at ₹299.",
+        intent: "cheapest_outfit"
+      };
+    }
+    if (normalized.includes('bridal')) {
+      return {
+        answer: "Bridal Belts are our most affordable bridal items at ₹399.",
+        intent: "cheapest_outfit"
+      };
+    }
+    return {
+      answer: "The cheapest outfit in our catalogue is Kids' Casual Dresses starting at ₹299 (in Kids' Wear). For adult wear, our most affordable outfits start at ₹399 (including Bridal Belts, Saree Blouses, and Co-Ord Sets).",
+      intent: "cheapest_outfit"
+    };
+  }
+
+  if (/\b(?:most\s+expensive|costliest|highest\s+price|maximum\s+price|highest\s+cost)\b/i.test(normalized)) {
+    return {
+      answer: "The most expensive outfit in our catalogue is Traditional Bridal Lehengas in Bridal Wear, ranging up to ₹69,999 (starting from ₹9,999).",
+      intent: "most_expensive_outfit"
+    };
+  }
+
+  if (/\b(?:more\s+costly|more\s+expensive|costlier|costs\s+more|higher\s+priced?)\b/i.test(normalized)) {
+    const candidates = [];
+    for (const item of CATALOGUE_INDEX) {
+      if (raw.toLowerCase().includes(item.name.toLowerCase()) || canonicalize(raw).includes(item.canonicalName)) {
+        if (!candidates.some(c => c.name.toLowerCase() === item.name.toLowerCase())) {
+          candidates.push(item);
+        }
+      }
+    }
+    if (candidates.length >= 2) {
+      const p1 = Number((candidates[0].rawPrice.match(/\d+/g) || [0]).pop());
+      const p2 = Number((candidates[1].rawPrice.match(/\d+/g) || [0]).pop());
+      if (p1 > p2) {
+        return {
+          answer: `${candidates[0].name} (${candidates[0].formattedPrice}) is more costly than ${candidates[1].name} (${candidates[1].formattedPrice}).`,
+          intent: "comparison_price"
+        };
+      } else if (p2 > p1) {
+        return {
+          answer: `${candidates[1].name} (${candidates[1].formattedPrice}) is more costly than ${candidates[0].name} (${candidates[0].formattedPrice}).`,
+          intent: "comparison_price"
+        };
+      } else {
+        return {
+          answer: `Both ${candidates[0].name} and ${candidates[1].name} have the same price of ${candidates[0].formattedPrice}.`,
+          intent: "comparison_price"
+        };
+      }
+    }
+    return {
+      answer: "Traditional Bridal Lehengas (up to ₹69,999) are our most costly designs. If you would like to compare two specific outfits, please let me know their names (for example, Evening Dresses vs Casual Dresses).",
+      intent: "comparison_price"
+    };
   }
 
   // --------------------------------------------------------------------------

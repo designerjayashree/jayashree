@@ -1,5 +1,4 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { evaluateRuleChatbot, resetConversationState } from "./ruleChatbot.js";
 import { 
   getFirestore, collection, addDoc, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, 
   serverTimestamp, query, where, orderBy, onSnapshot, writeBatch 
@@ -10,6 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { locationService } from "./location/index.js";
 import { BRIDAL_CATEGORIES, ETHNIC_CATEGORIES, KIDS_CATEGORIES, WESTERN_CATEGORIES, WOMEN_CATEGORIES } from "./catalogData.js";
+import { evaluateRuleChatbot, resetConversationState } from "./ruleChatbot.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyClbTtfoGIsidVBpXmnnoga7i8ITSAGJ9I",
@@ -184,6 +184,7 @@ let pendingPurchase = null;
 
 const ESTIMATED_DELIVERY_TIMELINE = "7–17 days";
 let currentCheckoutPurchase = null;
+let pendingOrderCheckout = null;
 
 /**
  * UI requests State data dynamically from the dedicated location structure
@@ -308,6 +309,12 @@ function updateLogisticsDisplay(pinCode, stateName) {
   }
 }
 
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 /**
  * Ensures currency symbol ₹ appears exactly once in the final rendered price.
  * Handles single amounts (e.g. "₹999", "999") and ranges (e.g. "₹9999–₹69999").
@@ -357,15 +364,17 @@ function isAnyModalOpen() {
   const checkoutOverlay = document.getElementById('checkoutModalOverlay');
   const catOverlay = document.getElementById('categoryPopupOverlay');
   const adminOverlay = document.getElementById('adminModalOverlay');
+  const adminReplyOverlay = document.getElementById('adminReplyModalOverlay');
   const confirmOverlay = document.getElementById('confirmOverlay');
 
   const authOpen = Boolean(authOverlay && authOverlay.classList.contains('open'));
   const checkoutOpen = Boolean(checkoutOverlay && checkoutOverlay.classList.contains('open'));
   const catOpen = Boolean(catOverlay && catOverlay.classList.contains('open'));
   const adminOpen = Boolean(adminOverlay && (adminOverlay.style.display === 'flex' || adminOverlay.classList.contains('open')));
+  const adminReplyOpen = Boolean(adminReplyOverlay && (adminReplyOverlay.style.display === 'flex' || adminReplyOverlay.classList.contains('open')));
   const confirmOpen = Boolean(confirmOverlay && confirmOverlay.classList.contains('open'));
 
-  return authOpen || checkoutOpen || catOpen || adminOpen || confirmOpen;
+  return authOpen || checkoutOpen || catOpen || adminOpen || adminReplyOpen || confirmOpen;
 }
 
 function updateModalLockState() {
@@ -411,7 +420,7 @@ if (typeof MutationObserver !== 'undefined') {
     updateModalLockState();
   });
   window.addEventListener('DOMContentLoaded', () => {
-    ['authModalOverlay', 'checkoutModalOverlay', 'categoryPopupOverlay', 'adminModalOverlay', 'confirmOverlay'].forEach(id => {
+    ['authModalOverlay', 'checkoutModalOverlay', 'categoryPopupOverlay', 'adminModalOverlay', 'adminReplyModalOverlay', 'confirmOverlay'].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         modalObserver.observe(el, { attributes: true, attributeFilter: ['class', 'style'] });
@@ -486,12 +495,10 @@ function openCheckoutModal(purchase) {
   // Update live summary visibility based on filled fields
   updateCheckoutSummaryFields();
 
-  // Reset button state
-  const submitBtn = document.getElementById('checkoutSubmitBtn');
-  if (submitBtn) {
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = '<span>Buy Now</span>';
-  }
+  // Reset button state and payment selection to Cash on Delivery
+  const codRadio = document.getElementById('paymentMethodCod');
+  if (codRadio) codRadio.checked = true;
+  updatePaymentMethodUI('cod');
 
   overlay.classList.add('open');
   updateModalLockState();
@@ -533,6 +540,9 @@ function updateCheckoutSummaryFields() {
   }
 
   if (allValid) {
+    const stateVal = stateInput ? stateInput.value.trim() : '';
+    const pinVal = pinInput ? pinInput.value.trim() : '';
+
     if (currentCheckoutPurchase) {
       if (sumName) sumName.textContent = currentCheckoutPurchase.design || 'Designer Outfit';
       if (sumSize) sumSize.textContent = currentCheckoutPurchase.size || 'Standard';
@@ -546,8 +556,6 @@ function updateCheckoutSummaryFields() {
       const areaVal = areaInput ? areaInput.value.trim() : '';
       const cityVal = cityInput ? cityInput.value.trim() : '';
       const distVal = distInput ? distInput.value.trim() : '';
-      const stateVal = stateInput ? stateInput.value.trim() : '';
-      const pinVal = pinInput ? pinInput.value.trim() : '';
 
       if (addrVal) parts.push(addrVal);
       if (areaVal) parts.push(areaVal);
@@ -564,6 +572,70 @@ function updateCheckoutSummaryFields() {
       sumEmail.textContent = emailInput ? emailInput.value.trim() : '';
     }
   }
+}
+
+function updatePaymentMethodUI(method) {
+  const codCard = document.getElementById('labelPaymentCod');
+  const onlineCard = document.getElementById('labelPaymentOnline');
+  const submitBtn = document.getElementById('checkoutSubmitBtn');
+
+  if (method === 'online') {
+    if (codCard) codCard.classList.remove('active');
+    if (onlineCard) onlineCard.classList.add('active');
+    if (submitBtn) submitBtn.innerHTML = '<span>Continue to Payment</span>';
+  } else {
+    if (codCard) codCard.classList.add('active');
+    if (onlineCard) onlineCard.classList.remove('active');
+    if (submitBtn) submitBtn.innerHTML = '<span>Place Order</span>';
+  }
+}
+
+function formatPaymentMethodDisplay(method) {
+  if (!method || typeof method !== 'string' || !method.trim()) {
+    return '<span class="admin-payment-not-recorded">Not recorded</span>';
+  }
+  const clean = method.trim();
+  const lower = clean.toLowerCase();
+  if (lower === 'cash on delivery' || lower === 'cod') {
+    return 'Cash on Delivery';
+  }
+  if (lower === 'online payment' || lower.includes('online') || lower.includes('prepaid') || lower.includes('card') || lower.includes('upi') || lower.includes('net banking')) {
+    return 'Online Payment';
+  }
+  return escapeHtml(clean);
+}
+
+function formatPaymentMethodText(method) {
+  if (!method || typeof method !== 'string' || !method.trim()) {
+    return 'Not recorded';
+  }
+  const clean = method.trim();
+  const lower = clean.toLowerCase();
+  if (lower === 'cash on delivery' || lower === 'cod') {
+    return 'Cash on Delivery';
+  }
+  if (lower === 'online payment' || lower.includes('online') || lower.includes('prepaid') || lower.includes('card') || lower.includes('upi') || lower.includes('net banking')) {
+    return 'Online Payment';
+  }
+  return clean;
+}
+
+function formatPaymentStatusBadge(status) {
+  if (!status || typeof status !== 'string' || !status.trim()) {
+    return '<span class="payment-badge payment-badge-not-recorded">Not recorded</span>';
+  }
+  const clean = status.trim();
+  const lower = clean.toLowerCase();
+  if (lower === 'paid') {
+    return '<span class="payment-badge payment-badge-paid">Paid</span>';
+  }
+  if (lower === 'pending' || lower === 'unpaid') {
+    return '<span class="payment-badge payment-badge-pending">Pending</span>';
+  }
+  if (lower === 'failed') {
+    return '<span class="payment-badge payment-badge-failed">Failed</span>';
+  }
+  return `<span class="payment-badge payment-badge-not-recorded">${escapeHtml(clean)}</span>`;
 }
 
 /**
@@ -611,24 +683,6 @@ function validateCheckoutForm() {
   return isValid;
 }
 
-/**
- * Simulated Payment Gateway Trigger
- * ---------------------------------
- * NOTE: Frontend-only phase. In production, this function will initialize
- * the real Razorpay checkout options (key, amount, order_id, handler callback).
- * Currently executes a placeholder simulated payment flow.
- */
-function processPaymentSimulation(orderPayload, onSuccess, onError) {
-  setTimeout(() => {
-    const simulatedResponse = {
-      paymentId: 'pay_sim_' + Math.random().toString(36).substring(2, 9).toUpperCase(),
-      status: 'success'
-    };
-    onSuccess(simulatedResponse);
-  }, 700);
-}
-
-let pendingOrderCheckout = null;
 
 function getSavedPendingPurchase() {
   try {
@@ -689,10 +743,230 @@ function restorePendingOrderDetails(order, authEmail) {
   if (emailInput && effectiveEmail) emailInput.value = effectiveEmail;
   if (order && effectiveEmail) order.email = effectiveEmail;
 
+  if (order.paymentMethodType) {
+    const radio = document.querySelector(`input[name="checkoutPaymentMethod"][value="${order.paymentMethodType}"]`);
+    if (radio) {
+      radio.checked = true;
+      updatePaymentMethodUI(order.paymentMethodType);
+    }
+  }
+
   updateCheckoutSummaryFields();
 }
 
-function executeOrderPayment(orderPayload) {
+async function finalizeAndSaveOrder({ orderPayload, paymentMethod, paymentStatus, razorpayData }) {
+  const deliveryView = document.getElementById('checkoutDeliveryView');
+  const successView = document.getElementById('checkoutSuccessView');
+
+  // Show Payment Success View
+  if (deliveryView) deliveryView.style.display = 'none';
+  if (successView) successView.style.display = 'block';
+
+  // Stable order reference (reuse intent if retry, or new unique ID)
+  const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+  const orderId = orderPayload.orderId || `JF-${randomSuffix}`;
+  const fourDigitOrderNumber = orderPayload.orderNumber || String(Math.floor(1000 + Math.random() * 9000));
+  orderPayload.orderId = orderId;
+  orderPayload.orderNumber = fourDigitOrderNumber;
+
+  const orderIdEl = document.getElementById('confirmOrderId');
+  const productEl = document.getElementById('confirmProduct');
+  const sizeEl = document.getElementById('confirmSize');
+  const amountEl = document.getElementById('confirmAmount');
+  const addrEl = document.getElementById('confirmAddress');
+  const emailEl = document.getElementById('confirmEmailDisplay');
+  const payMethodEl = document.getElementById('confirmPaymentMethod');
+  const payStatusEl = document.getElementById('confirmPaymentStatus');
+  const confirmSuccessSub = document.getElementById('confirmSuccessSub');
+
+  const customer = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
+  const currentUser = window.fbAuth?.currentUser;
+  const finalEmail = currentUser?.email || customer?.email || orderPayload.email || '';
+  const finalUid = currentUser?.uid || customer?.uid || 'guest';
+  const formattedPrice = formatPrice(orderPayload.purchase?.price);
+
+  if (orderIdEl) orderIdEl.textContent = `#${fourDigitOrderNumber}`;
+  if (productEl) productEl.textContent = orderPayload.purchase?.design || 'Designer Outfit';
+  if (sizeEl) sizeEl.textContent = orderPayload.purchase?.size || 'Standard';
+  if (amountEl) amountEl.textContent = formattedPrice;
+  if (addrEl) addrEl.textContent = orderPayload.formattedAddress;
+  if (emailEl) emailEl.textContent = finalEmail;
+  if (payMethodEl) payMethodEl.textContent = paymentMethod;
+  if (payStatusEl) {
+    payStatusEl.textContent = paymentMethod === 'Cash on Delivery' ? 'Pending (Pay on delivery)' : 'Paid';
+  }
+  if (confirmSuccessSub) {
+    confirmSuccessSub.textContent = paymentMethod === 'Cash on Delivery'
+      ? 'Your order has been placed successfully. Payment is due upon delivery.'
+      : 'Your payment was successful.';
+  }
+
+  const confirmEstimateEl = document.getElementById('confirmEstimate');
+  if (confirmEstimateEl && orderPayload.estimatedDelivery) {
+    confirmEstimateEl.textContent = orderPayload.estimatedDelivery;
+  }
+
+  const firestoreOrder = {
+    orderId: orderId,
+    orderNumber: fourDigitOrderNumber,
+    userId: finalUid,
+    customerEmail: finalEmail,
+    customerName: customer?.name || (finalEmail ? finalEmail.split('@')[0] : 'Customer'),
+    customerPhone: orderPayload.phone || '—',
+    productId: String(orderPayload.purchase?.num || orderPayload.purchase?.cardId || ''),
+    productName: orderPayload.purchase?.design || 'Designer Outfit',
+    product: orderPayload.purchase?.design || 'Designer Outfit',
+    category: orderPayload.purchase?.category || '',
+    subcategory: orderPayload.purchase?.subcategory || '',
+    size: orderPayload.purchase?.size || 'Standard',
+    price: formattedPrice,
+    amount: formattedPrice,
+    quantity: 1,
+    state: orderPayload.state || '',
+    district: orderPayload.district || '',
+    city: orderPayload.city || '',
+    pinCode: orderPayload.pinCode || '',
+    area: orderPayload.area || '',
+    fullAddress: orderPayload.fullAddress || '',
+    address: orderPayload.formattedAddress || '',
+    estimatedDelivery: orderPayload.estimatedDelivery || '',
+    paymentMethod: paymentMethod, // 'Cash on Delivery' or 'Online Payment'
+    paymentStatus: paymentStatus, // 'Pending' or 'Paid'
+    orderStatus: 'Processing',
+    status: 'Processing',
+    customMessage: '',
+    razorpayOrderId: razorpayData?.orderId || '',
+    razorpayPaymentId: razorpayData?.paymentId || '',
+    date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+    createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString(),
+    updatedAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
+  };
+
+  if (window.fbDb && window.fbFns) {
+    let orderSavedToFirestore = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'orders', orderId), firestoreOrder);
+        orderSavedToFirestore = true;
+        break;
+      } catch (err) {
+        console.warn(`Firestore setDoc order attempt ${attempt + 1} failed:`, err);
+        if (attempt === 0) await new Promise(r => setTimeout(r, 600));
+      }
+    }
+    if (!orderSavedToFirestore) {
+      console.error('Failed to sync order to cloud Firestore after retries. Local backup preserved.');
+    }
+
+    try {
+      await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'deliveryData', orderId), {
+        orderId: orderId,
+        userId: finalUid,
+        customerName: firestoreOrder.customerName,
+        customerEmail: finalEmail,
+        customerPhone: firestoreOrder.customerPhone,
+        state: orderPayload.state || '',
+        district: orderPayload.district || '',
+        city: orderPayload.city || '',
+        pinCode: orderPayload.pinCode || '',
+        area: orderPayload.area || '',
+        fullAddress: orderPayload.fullAddress || '',
+        address: orderPayload.formattedAddress || '',
+        estimatedDelivery: orderPayload.estimatedDelivery || '',
+        createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
+      });
+    } catch (dErr) {
+      console.warn('Firestore deliveryData setDoc error:', dErr);
+    }
+
+    if (finalUid && finalUid !== 'guest' && finalEmail) {
+      try {
+        await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'users', finalUid), {
+          uid: finalUid,
+          email: finalEmail,
+          resendEmail: finalEmail,
+          lastOrderEmail: finalEmail,
+          lastOrderId: orderId,
+          lastOrderAmount: formattedPrice,
+          updatedAt: window.fbFns.serverTimestamp()
+        }, { merge: true });
+      } catch (uErr) {
+        console.warn('Firestore user doc update for Resend order email error:', uErr);
+      }
+    }
+  }
+
+  // Update local Admin Orders store
+  try {
+    const currentAdminOrders = getAdminOrders();
+    const existingIndex = currentAdminOrders.findIndex(o =>
+      o.id === orderId ||
+      o.orderId === orderId ||
+      (orderPayload.clientOrderId && o.clientOrderId === orderPayload.clientOrderId)
+    );
+    const adminRecord = {
+      id: orderId,
+      orderId: orderId,
+      clientOrderId: orderPayload.clientOrderId || '',
+      orderNumber: fourDigitOrderNumber,
+      userId: finalUid,
+      date: firestoreOrder.date,
+      createdAt: new Date().toISOString(),
+      customerName: firestoreOrder.customerName,
+      customerEmail: finalEmail,
+      customerPhone: '—',
+      product: firestoreOrder.productName,
+      size: firestoreOrder.size,
+      quantity: 1,
+      amount: formattedPrice,
+      price: formattedPrice,
+      status: 'Processing',
+      orderStatus: 'Processing',
+      customMessage: '',
+      paymentMethod: paymentMethod,
+      paymentStatus: paymentStatus,
+      address: orderPayload.formattedAddress,
+      estimatedDelivery: orderPayload.estimatedDelivery || '',
+      state: orderPayload.state || '',
+      pinCode: orderPayload.pinCode || '',
+      cancelledBy: '',
+      cancelledAt: null
+    };
+
+    if (existingIndex >= 0) {
+      currentAdminOrders[existingIndex] = adminRecord;
+    } else {
+      currentAdminOrders.unshift(adminRecord);
+    }
+    saveAdminOrders(currentAdminOrders);
+
+    // Sync to currentCustomerOrders if matching customer
+    try {
+      const customerRecord = {
+        ...adminRecord,
+        docId: orderId,
+        productName: firestoreOrder.productName
+      };
+      const cIndex = currentCustomerOrders.findIndex(o => (o.id || o.orderId) === orderId);
+      if (cIndex >= 0) {
+        currentCustomerOrders[cIndex] = customerRecord;
+      } else {
+        currentCustomerOrders.unshift(customerRecord);
+      }
+      renderCustomerOrdersList(currentCustomerOrders);
+    } catch (cSyncErr) {
+      console.warn('Customer orders sync error:', cSyncErr);
+    }
+  } catch (e) {
+    console.warn('Local admin orders save error:', e);
+  }
+
+  try {
+    sessionStorage.removeItem('pendingOrderCheckout');
+  } catch (e) {}
+}
+
+async function executeOrderPayment(orderPayload) {
   if (!orderPayload) return;
 
   const overlay = document.getElementById('checkoutModalOverlay');
@@ -707,164 +981,173 @@ function executeOrderPayment(orderPayload) {
   if (successView) successView.style.display = 'none';
 
   const submitBtn = document.getElementById('checkoutSubmitBtn');
-  if (submitBtn) {
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = '<span>Processing payment...</span>';
+  const paymentMethodType = orderPayload.paymentMethodType || 'cod';
+
+  // Branch 1: Cash on Delivery (COD)
+  if (paymentMethodType === 'cod') {
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span>Placing order...</span>';
+    }
+
+    try {
+      await finalizeAndSaveOrder({
+        orderPayload,
+        paymentMethod: 'Cash on Delivery',
+        paymentStatus: 'Pending',
+        razorpayData: null
+      });
+    } catch (err) {
+      console.error('Error placing COD order:', err);
+      alert('Unable to place Cash on Delivery order. Please try again.');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span>Place Order</span>';
+      }
+    }
+    return;
   }
 
-  processPaymentSimulation(orderPayload, async (paymentResponse) => {
-    // Show Payment Success View
-    if (deliveryView) deliveryView.style.display = 'none';
-    if (successView) successView.style.display = 'block';
+  // Branch 2: Pay Online (Razorpay)
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span>Initiating payment...</span>';
+  }
 
-    const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-    const orderId = `JF-${randomSuffix}`;
-    const fourDigitOrderNumber = String(Math.floor(1000 + Math.random() * 9000));
-    const orderIdEl = document.getElementById('confirmOrderId');
-    const productEl = document.getElementById('confirmProduct');
-    const sizeEl = document.getElementById('confirmSize');
-    const amountEl = document.getElementById('confirmAmount');
-    const addrEl = document.getElementById('confirmAddress');
-    const emailEl = document.getElementById('confirmEmailDisplay');
+  try {
+    const rawPrice = orderPayload.purchase?.price || '0';
+    const numericAmount = typeof rawPrice === 'number' ? rawPrice : parseFloat(String(rawPrice).replace(/[^0-9.]/g, '')) || 0;
+
+    // Stable intent key per checkout attempt to prevent duplicate orders
+    if (!orderPayload.clientOrderId) {
+      orderPayload.clientOrderId = 'intent_' + Date.now() + '_' + Math.floor(1000 + Math.random() * 9000);
+    }
+
+    const orderRes = await fetch('/api/payment/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount: numericAmount,
+        receipt: orderPayload.clientOrderId
+      })
+    });
+
+    const orderData = await orderRes.json();
+
+    if (!orderRes.ok || !orderData.success) {
+      const errMsg = orderData.error || 'Online payment is currently unavailable. Please choose Cash on Delivery.';
+      alert(errMsg);
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span>Continue to Payment</span>';
+      }
+      return;
+    }
+
+    const rzpOrder = orderData.order;
+    const keyId = orderData.keyId;
+
+    if (!window.Razorpay) {
+      alert('Payment service could not be loaded. Please check your connection or choose Cash on Delivery.');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span>Continue to Payment</span>';
+      }
+      return;
+    }
 
     const customer = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
     const currentUser = window.fbAuth?.currentUser;
-    const finalEmail = currentUser?.email || customer?.email || orderPayload.email || '';
-    const finalUid = currentUser?.uid || customer?.uid || 'guest';
-    const formattedPrice = formatPrice(orderPayload.purchase?.price);
+    const userEmail = currentUser?.email || customer?.email || orderPayload.email || '';
+    const userPhone = orderPayload.phone || customer?.phone || '';
 
-    if (orderIdEl) orderIdEl.textContent = `#${fourDigitOrderNumber}`;
-    if (productEl) productEl.textContent = orderPayload.purchase?.design || 'Designer Outfit';
-    if (sizeEl) sizeEl.textContent = orderPayload.purchase?.size || 'Standard';
-    if (amountEl) amountEl.textContent = formattedPrice;
-    if (addrEl) addrEl.textContent = orderPayload.formattedAddress;
-    if (emailEl) emailEl.textContent = finalEmail;
-    const confirmEstimateEl = document.getElementById('confirmEstimate');
-    if (confirmEstimateEl && orderPayload.estimatedDelivery) {
-      confirmEstimateEl.textContent = orderPayload.estimatedDelivery;
-    }
+    const rzpOptions = {
+      key: keyId,
+      amount: rzpOrder.amount,
+      currency: rzpOrder.currency || 'INR',
+      name: 'Jayashree',
+      description: orderPayload.purchase?.design || 'Designer Outfit',
+      order_id: rzpOrder.id,
+      prefill: {
+        email: userEmail,
+        contact: userPhone
+      },
+      theme: {
+        color: '#2F2924'
+      },
+      handler: async function (response) {
+        if (submitBtn) {
+          submitBtn.innerHTML = '<span>Verifying payment...</span>';
+        }
 
-    const firestoreOrder = {
-      orderId: orderId,
-      orderNumber: fourDigitOrderNumber,
-      userId: finalUid,
-      customerEmail: finalEmail,
-      customerName: customer?.name || (finalEmail ? finalEmail.split('@')[0] : 'Customer'),
-      customerPhone: orderPayload.phone || '—',
-      productId: String(orderPayload.purchase?.num || orderPayload.purchase?.cardId || ''),
-      productName: orderPayload.purchase?.design || 'Designer Outfit',
-      product: orderPayload.purchase?.design || 'Designer Outfit',
-      category: orderPayload.purchase?.category || '',
-      subcategory: orderPayload.purchase?.subcategory || '',
-      size: orderPayload.purchase?.size || 'Standard',
-      price: formattedPrice,
-      amount: formattedPrice,
-      quantity: 1,
-      state: orderPayload.state || '',
-      district: orderPayload.district || '',
-      city: orderPayload.city || '',
-      pinCode: orderPayload.pinCode || '',
-      area: orderPayload.area || '',
-      fullAddress: orderPayload.fullAddress || '',
-      address: orderPayload.formattedAddress || '',
-      estimatedDelivery: orderPayload.estimatedDelivery || '',
-      paymentStatus: 'Paid',
-      orderStatus: 'Processing',
-      status: 'Processing',
-      customMessage: '',
-      paymentMethod: 'Prepaid / Online',
-      razorpayOrderId: 'sim_ord_' + randomSuffix,
-      razorpayPaymentId: paymentResponse?.paymentId || ('pay_sim_' + randomSuffix),
-      razorpaySignature: 'sim_sig_' + randomSuffix,
-      date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
-      createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString(),
-      updatedAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
-    };
-
-    if (window.fbDb && window.fbFns) {
-      try {
-        await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'orders', orderId), firestoreOrder);
-      } catch (err) {
-        console.warn('Firestore setDoc order error:', err);
-      }
-
-      try {
-        await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'deliveryData', orderId), {
-          orderId: orderId,
-          userId: finalUid,
-          customerName: firestoreOrder.customerName,
-          customerEmail: finalEmail,
-          customerPhone: firestoreOrder.customerPhone,
-          state: orderPayload.state || '',
-          district: orderPayload.district || '',
-          city: orderPayload.city || '',
-          pinCode: orderPayload.pinCode || '',
-          area: orderPayload.area || '',
-          fullAddress: orderPayload.fullAddress || '',
-          address: orderPayload.formattedAddress || '',
-          estimatedDelivery: orderPayload.estimatedDelivery || '',
-          createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
-        });
-      } catch (dErr) {
-        console.warn('Firestore deliveryData setDoc error:', dErr);
-      }
-
-      // Store/update authenticated user's email in Firestore for future order confirmation emails through Resend
-      if (finalUid && finalUid !== 'guest' && finalEmail) {
         try {
-          await window.fbFns.setDoc(window.fbFns.doc(window.fbDb, 'users', finalUid), {
-            uid: finalUid,
-            email: finalEmail,
-            resendEmail: finalEmail,
-            lastOrderEmail: finalEmail,
-            lastOrderId: orderId,
-            lastOrderAmount: formattedPrice,
-            updatedAt: window.fbFns.serverTimestamp()
-          }, { merge: true });
-        } catch (uErr) {
-          console.warn('Firestore user doc update for Resend order email error:', uErr);
+          const verifyRes = await fetch('/api/payment/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature
+            })
+          });
+
+          const verifyData = await verifyRes.json();
+
+          if (verifyRes.ok && verifyData.success && verifyData.verified) {
+            await finalizeAndSaveOrder({
+              orderPayload,
+              paymentMethod: 'Online Payment',
+              paymentStatus: 'Paid',
+              razorpayData: {
+                orderId: response.razorpay_order_id,
+                paymentId: response.razorpay_payment_id,
+                signature: response.razorpay_signature
+              }
+            });
+          } else {
+            alert('Payment verification failed on the server. Your order was not confirmed.');
+          }
+        } catch (vErr) {
+          console.error('Payment verification error:', vErr);
+          alert('Network error verifying payment. Please contact support.');
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span>Continue to Payment</span>';
+          }
+        }
+      },
+      modal: {
+        ondismiss: function () {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span>Continue to Payment</span>';
+          }
         }
       }
-    }
+    };
 
-    console.log(`[Order Confirmation] Resend email target set to: ${finalEmail} for order ${orderId}`);
+    const rzpInstance = new window.Razorpay(rzpOptions);
+    rzpInstance.on('payment.failed', function (failResp) {
+      console.warn('Payment failed:', failResp);
+      alert('Payment failed: ' + (failResp.error?.description || 'Transaction declined'));
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span>Continue to Payment</span>';
+      }
+    });
 
-    try {
-      const currentAdminOrders = getAdminOrders();
-      currentAdminOrders.unshift({
-        id: orderId,
-        orderId: orderId,
-        orderNumber: fourDigitOrderNumber,
-        userId: finalUid,
-        date: firestoreOrder.date,
-        createdAt: new Date().toISOString(),
-        customerName: firestoreOrder.customerName,
-        customerEmail: finalEmail,
-        customerPhone: '—',
-        product: firestoreOrder.productName,
-        size: firestoreOrder.size,
-        quantity: 1,
-        amount: formattedPrice,
-        price: formattedPrice,
-        status: 'Processing',
-        orderStatus: 'Processing',
-        customMessage: '',
-        paymentMethod: 'Online',
-        address: orderPayload.formattedAddress,
-        estimatedDelivery: orderPayload.estimatedDelivery || '',
-        state: orderPayload.state || '',
-        pinCode: orderPayload.pinCode || '',
-        cancelledBy: '',
-        cancelledAt: null
-      });
-      saveAdminOrders(currentAdminOrders);
-    } catch (e) {}
+    rzpInstance.open();
 
+  } catch (err) {
+    console.error('Online payment error:', err);
+    alert('Unable to initiate online payment: ' + (err.message || 'Server error. Please use Cash on Delivery.'));
     if (submitBtn) {
       submitBtn.disabled = false;
-      submitBtn.innerHTML = '<span>Buy Now</span>';
+      submitBtn.innerHTML = '<span>Continue to Payment</span>';
     }
-  });
+  }
 }
 
 function handleCheckoutSubmit(e) {
@@ -878,6 +1161,7 @@ function handleCheckoutSubmit(e) {
   const pinVal = document.getElementById('deliveryPin')?.value.trim() || '';
   const addrVal = document.getElementById('deliveryAddress')?.value.trim() || '';
   const emailVal = document.getElementById('deliveryEmail')?.value.trim() || '';
+  const paymentMethodType = document.querySelector('input[name="checkoutPaymentMethod"]:checked')?.value || 'cod';
 
   const parts = [];
   if (addrVal) parts.push(addrVal);
@@ -898,6 +1182,7 @@ function handleCheckoutSubmit(e) {
     fullAddress: addrVal,
     formattedAddress,
     email: emailVal,
+    paymentMethodType,
     price: formatPrice(currentCheckoutPurchase?.price),
     estimatedDelivery: getEstimatedDelivery(pinVal, stateVal)
   };
@@ -1238,34 +1523,24 @@ function handleCustomisationBack() {
   }
 }
 
+let isBackActionDebounced = false;
 function handleBack() {
+  if (isBackActionDebounced) return;
+  isBackActionDebounced = true;
+  setTimeout(() => { isBackActionDebounced = false; }, 350);
+
   const { path } = parseHash();
 
   if (sessionStorage.getItem('openedFromMobileMenu') === 'true') {
     sessionStorage.removeItem('openedFromMobileMenu');
     const origin = sessionStorage.getItem('mobileMenuOriginRoute') || '#/';
     sessionStorage.removeItem('mobileMenuOriginRoute');
-    isNavigatingBack = true;
-    if (appHistory.length > 1) {
-      appHistory.pop();
-    }
-    if (window.location.hash !== origin) {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
       window.location.hash = origin;
     }
     openMobileMenu();
-    return;
-  }
-
-  if (sessionStorage.getItem('openedFromViewCollection') === 'true') {
-    isNavigatingBack = true;
-    if (appHistory.length > 1) {
-      appHistory.pop();
-    }
-    const origin = sessionStorage.getItem('viewCollectionOriginRoute') || '#/';
-    if (window.location.hash !== origin) {
-      window.location.hash = origin;
-    }
-    navigate();
     return;
   }
 
@@ -1273,24 +1548,14 @@ function handleBack() {
     handleCustomisationBack();
     return;
   }
-  if (appHistory.length > 1) {
-    appHistory.pop();
-    const prevRoute = appHistory.pop();
-    isNavigatingBack = true;
-    window.location.hash = prevRoute || '#/';
+
+  if (appHistory.length > 1 && window.history.length > 1) {
+    window.history.back();
   } else {
     window.location.hash = '#/';
   }
 }
 window.handleBack = handleBack;
-
-document.addEventListener('click', (e) => {
-  const backBtn = e.target.closest('.back-home');
-  if (backBtn) {
-    e.preventDefault();
-    handleBack();
-  }
-});
 
 const pages = {
   '/': 'home', '/women': 'women', '/kids': 'kids',
@@ -1341,14 +1606,8 @@ function navigate() {
   const target = document.querySelector(`.page[data-page="${pageKey}"]`);
   if (target) target.classList.add('active');
 
-  if (pageKey === 'home' && sessionStorage.getItem('openedFromViewCollection') === 'true') {
-    sessionStorage.removeItem('openedFromViewCollection');
-    sessionStorage.removeItem('viewCollectionOriginRoute');
-    openCollectionPopup(true);
-  }
-  if (path !== '/' && !['/women', '/kids', '/bridal', '/ethnic', '/western'].includes(path)) {
-    sessionStorage.removeItem('openedFromViewCollection');
-    sessionStorage.removeItem('viewCollectionOriginRoute');
+  if (path !== '/' && path !== '' && popupOverlay && popupOverlay.classList.contains('open')) {
+    closeCollectionPopup(true, false);
   }
 
   document.querySelectorAll('.nav-links a').forEach(a => {
@@ -1402,13 +1661,13 @@ function navigate() {
         summaryContainer.innerHTML = `
           <div class="customisation-summary-box">
             <div class="summary-label">Customise your design</div>
-            <h3 class="summary-design">${design}</h3>
-            ${price ? `<div class="summary-price">${price}</div>` : ''}
+            <h3 class="summary-design">${escapeHtml(design)}</h3>
+            ${price ? `<div class="summary-price">${escapeHtml(price)}</div>` : ''}
             
             <div style="margin-top: 24px; text-align: left; max-width: 400px; margin-left: auto; margin-right: auto;">
               <div class="details-label" style="margin-bottom: 8px;">Size</div>
               <div class="size-chips" id="custom-size-chips" style="margin-bottom: 20px;">
-                ${itemSizes.map(s => `<button type="button" class="size-chip ${size === s ? 'active' : ''}" onclick="selectCustomSize('${s}')">${s}</button>`).join('')}
+                ${itemSizes.map(s => `<button type="button" class="size-chip ${size === s ? 'active' : ''}" onclick="selectCustomSize('${escapeHtml(s)}')">${escapeHtml(s)}</button>`).join('')}
               </div>
             </div>
           </div>
@@ -1809,7 +2068,7 @@ const popupClose = document.getElementById('popupClose');
 const openPopupBtn = document.getElementById('openPopupBtn');
 const popupCats = document.querySelectorAll('.popup-cat');
 
-function openCollectionPopup(instant = false) {
+function openCollectionPopup(instant = false, pushState = true) {
   if (instant) {
     popupOverlay.style.transition = 'none';
     const popupCard = popupOverlay.querySelector('.category-popup');
@@ -1824,9 +2083,37 @@ function openCollectionPopup(instant = false) {
       if (popupCard) popupCard.style.transition = '';
     });
   }
+
+  if (pushState && (!window.history.state || window.history.state.popup !== 'collection')) {
+    window.history.pushState({ popup: 'collection' }, '', window.location.href);
+  }
 }
 
-function closeCollectionPopup(instant = false) {
+function closeCollectionPopup(instant = false, syncHistory = false) {
+  if (syncHistory && window.history.state && window.history.state.popup === 'collection') {
+    if (instant) {
+      popupOverlay.style.transition = 'none';
+      const popupCard = popupOverlay.querySelector('.category-popup');
+      if (popupCard) popupCard.style.transition = 'none';
+    }
+    popupOverlay.classList.remove('open');
+    updateModalLockState();
+    if (instant) {
+      requestAnimationFrame(() => {
+        popupOverlay.style.transition = '';
+        const popupCard = popupOverlay.querySelector('.category-popup');
+        if (popupCard) popupCard.style.transition = '';
+      });
+    }
+
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.history.replaceState(null, '', window.location.href);
+    }
+    return;
+  }
+
   if (instant) {
     popupOverlay.style.transition = 'none';
     const popupCard = popupOverlay.querySelector('.category-popup');
@@ -1843,10 +2130,12 @@ function closeCollectionPopup(instant = false) {
   }
 }
 
-if (openPopupBtn) openPopupBtn.addEventListener('click', () => openCollectionPopup(false));
-if (popupClose) popupClose.addEventListener('click', () => closeCollectionPopup(false));
+if (openPopupBtn) openPopupBtn.addEventListener('click', () => openCollectionPopup(false, true));
+if (popupClose) popupClose.addEventListener('click', () => closeCollectionPopup(false, true));
 if (popupOverlay) {
-  popupOverlay.addEventListener('click', (e) => { if (e.target === popupOverlay) closeCollectionPopup(false); });
+  popupOverlay.addEventListener('click', (e) => {
+    if (e.target === popupOverlay) closeCollectionPopup(false, true);
+  });
 }
 popupCats.forEach(cat => {
   cat.addEventListener('click', (e) => {
@@ -1856,10 +2145,8 @@ popupCats.forEach(cat => {
 
     sessionStorage.removeItem('openedFromMobileMenu');
     sessionStorage.removeItem('mobileMenuOriginRoute');
-    sessionStorage.setItem('openedFromViewCollection', 'true');
-    sessionStorage.setItem('viewCollectionOriginRoute', '#/');
 
-    closeCollectionPopup(true);
+    closeCollectionPopup(true, false);
     const targetPageKey = targetRoute.replace(/^#\/?/, '').split('?')[0];
     if (CATALOGUE_DATA[targetPageKey]) {
       const firstSubcat = Object.keys(CATALOGUE_DATA[targetPageKey].categories)[0];
@@ -1877,7 +2164,19 @@ popupCats.forEach(cat => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && popupOverlay && popupOverlay.classList.contains('open')) closeCollectionPopup(false);
+  if (e.key === 'Escape' && popupOverlay && popupOverlay.classList.contains('open')) {
+    closeCollectionPopup(false, true);
+  }
+});
+
+window.addEventListener('popstate', (e) => {
+  if (e.state && e.state.popup === 'collection') {
+    openCollectionPopup(false, false);
+  } else {
+    if (popupOverlay && popupOverlay.classList.contains('open')) {
+      closeCollectionPopup(false, false);
+    }
+  }
 });
 
 /* =========================================================
@@ -2100,37 +2399,35 @@ function getExpectedDeliveryForOrder(order) {
   return formatDynamicDeliveryDateRange(pinCode, state, orderDate);
 }
 
-const ORDER_CANCELLATION_WINDOW_MS = 24 * 60 * 60 * 1000;
-
 function isOrderCancellable(order) {
   if (!order) return false;
-  const status = (order.orderStatus || order.status || '').toLowerCase().trim();
-  const nonCancellable = ['cancelled', 'completed', 'delivered', 'shipped'];
+  const status = (order.status || order.orderStatus || 'Processing').trim().toLowerCase();
+  const nonCancellable = ['shipped', 'out for delivery', 'delivered', 'cancelled'];
   if (nonCancellable.includes(status)) {
     return false;
   }
   const createdMs = getOrderTimestamp(order);
   if (!createdMs) return false;
   const now = Date.now();
-  const deadlineMs = createdMs + ORDER_CANCELLATION_WINDOW_MS;
+  const deadlineMs = createdMs + (24 * 60 * 60 * 1000);
   return now < deadlineMs;
 }
 
 function formatRemainingCancellationTime(createdMs) {
+  if (!createdMs || isNaN(createdMs)) {
+    return { expired: true, text: '00:00:00', remainingMs: 0 };
+  }
   const now = Date.now();
-  const deadlineMs = createdMs + ORDER_CANCELLATION_WINDOW_MS;
+  const deadlineMs = createdMs + (24 * 60 * 60 * 1000);
   const remainingMs = deadlineMs - now;
-
   if (remainingMs <= 0) {
     return { expired: true, text: '00:00:00', remainingMs: 0 };
   }
-
   const totalSecs = Math.floor(remainingMs / 1000);
   const hrs = Math.floor(totalSecs / 3600);
   const mins = Math.floor((totalSecs % 3600) / 60);
   const secs = totalSecs % 60;
   const text = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-
   return { expired: false, text, remainingMs };
 }
 
@@ -2145,21 +2442,39 @@ function updateCancellationCountdowns() {
 
   countdownEls.forEach(el => {
     const createdMs = Number(el.getAttribute('data-created-at'));
-    if (!createdMs || isNaN(createdMs)) return;
-
     const res = formatRemainingCancellationTime(createdMs);
+
     if (res.expired) {
       const actionArea = el.closest('.my-order-action-area');
       if (actionArea) {
         actionArea.innerHTML = `
-          <div class="my-order-cancel-wrap">
-            <span class="my-order-period-ended">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <polyline points="12 6 12 12 16 14"/>
-              </svg>
-              <span>Cancellation period expired</span>
-            </span>
+          <div class="my-order-cancel-wrap my-order-cancel-panel is-expired">
+            <div class="my-order-cancel-main">
+              <div class="my-order-cancel-clock-badge" aria-hidden="true">
+                <svg class="my-order-cancel-clock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
+              </div>
+              <div class="my-order-cancel-text-block">
+                <span class="my-order-cancel-title">CANCELLATION WINDOW</span>
+                <div class="my-order-countdown is-expired">
+                  <span class="my-order-period-ended">Cancellation period ended</span>
+                </div>
+                <p class="my-order-cancel-policy-hint">You can cancel this order within 24 hours of placing it.</p>
+              </div>
+            </div>
+            <div class="my-order-cancel-divider" aria-hidden="true"></div>
+            <button type="button" class="my-order-hold-cancel-btn is-disabled" disabled aria-disabled="true" aria-label="Cancellation disabled">
+              <span class="hold-btn-content">
+                <svg class="hold-btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="15" y1="9" x2="9" y2="15"/>
+                  <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+                <span class="hold-btn-text">Hold to Cancel</span>
+              </span>
+            </button>
           </div>
         `;
       }
@@ -2170,18 +2485,13 @@ function updateCancellationCountdowns() {
       }
     }
   });
-
-  const remainingCountdowns = document.querySelectorAll('.my-order-countdown[data-created-at]');
-  if (!remainingCountdowns || remainingCountdowns.length === 0) {
-    stopCancellationCountdownTicker();
-  }
 }
 
 function startCancellationCountdownTicker() {
   stopCancellationCountdownTicker();
+  updateCancellationCountdowns();
   const remainingCountdowns = document.querySelectorAll('.my-order-countdown[data-created-at]');
   if (remainingCountdowns && remainingCountdowns.length > 0) {
-    updateCancellationCountdowns();
     cancellationCountdownIntervalId = setInterval(updateCancellationCountdowns, 1000);
   }
 }
@@ -2465,6 +2775,7 @@ function renderCustomerOrdersList(orders) {
   if (Array.isArray(orders)) {
     currentCustomerOrders = orders;
   }
+  window.currentCustomerOrders = currentCustomerOrders;
   const listEl = document.getElementById('customerMyOrdersList');
   const badgeEl = document.getElementById('customerOrdersCountBadge');
   if (!listEl) return;
@@ -2499,6 +2810,7 @@ function renderCustomerOrdersList(orders) {
     const orderDateFormatted = formatOrderDisplayDate(order);
     const expectedDeliveryFormatted = getExpectedDeliveryForOrder(order);
     const customMsg = (order.customMessage || '').trim();
+    const createdMs = getOrderTimestamp(order);
     const cancellable = isOrderCancellable(order);
     const isCancelled = rawStatus.toLowerCase() === 'cancelled';
     const isDelivered = rawStatus.toLowerCase() === 'delivered';
@@ -2532,18 +2844,95 @@ function renderCustomerOrdersList(orders) {
       // Delivered order cannot be cancelled
       footerHtml = '';
     } else if (cancellable) {
-      // Within 24 hours: Hold to Cancel button with live cancellation countdown
       const countdown = formatRemainingCancellationTime(createdMs);
-      footerHtml = `
-        <div class="my-order-cancel-wrap">
-          <div class="my-order-countdown" data-order-id="${escapeHtml(orderDocId)}" data-created-at="${createdMs}">
-            <span class="my-order-countdown-label">Time left to cancel:</span>
-            <span class="my-order-countdown-timer">${escapeHtml(countdown.text)}</span>
+      if (countdown.expired) {
+        footerHtml = `
+          <div class="my-order-cancel-wrap my-order-cancel-panel is-expired">
+            <div class="my-order-cancel-main">
+              <div class="my-order-cancel-clock-badge" aria-hidden="true">
+                <svg class="my-order-cancel-clock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
+              </div>
+              <div class="my-order-cancel-text-block">
+                <span class="my-order-cancel-title">CANCELLATION WINDOW</span>
+                <div class="my-order-countdown is-expired">
+                  <span class="my-order-period-ended">Cancellation period ended</span>
+                </div>
+                <p class="my-order-cancel-policy-hint">You can cancel this order within 24 hours of placing it.</p>
+              </div>
+            </div>
+            <div class="my-order-cancel-divider" aria-hidden="true"></div>
+            <button type="button" class="my-order-hold-cancel-btn is-disabled" disabled aria-disabled="true" aria-label="Cancellation disabled">
+              <span class="hold-btn-content">
+                <svg class="hold-btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="15" y1="9" x2="9" y2="15"/>
+                  <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+                <span class="hold-btn-text">Hold to Cancel</span>
+              </span>
+            </button>
           </div>
-          <button type="button" class="my-order-hold-cancel-btn" data-order-id="${escapeHtml(orderDocId)}" aria-label="Hold to Cancel">
-            <span class="hold-progress-fill" aria-hidden="true"></span>
+        `;
+      } else {
+        // Within 24 hours: Live Countdown + Hold to Cancel button matching reference image
+        footerHtml = `
+          <div class="my-order-cancel-wrap my-order-cancel-panel">
+            <div class="my-order-cancel-main">
+              <div class="my-order-cancel-clock-badge" aria-hidden="true">
+                <svg class="my-order-cancel-clock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
+              </div>
+              <div class="my-order-cancel-text-block">
+                <span class="my-order-cancel-title">CANCELLATION WINDOW</span>
+                <div class="my-order-countdown" data-order-id="${escapeHtml(orderDocId)}" data-created-at="${createdMs}">
+                  <span class="my-order-countdown-timer">${escapeHtml(countdown.text)}</span>
+                </div>
+                <p class="my-order-cancel-policy-hint">You can cancel this order within 24 hours of placing it.</p>
+              </div>
+            </div>
+            <div class="my-order-cancel-divider" aria-hidden="true"></div>
+            <button type="button" class="my-order-hold-cancel-btn" data-order-id="${escapeHtml(orderDocId)}" aria-label="Hold to Cancel">
+              <span class="hold-progress-fill" aria-hidden="true"></span>
+              <span class="hold-btn-content">
+                <svg class="hold-btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="15" y1="9" x2="9" y2="15"/>
+                  <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+                <span class="hold-btn-text">Hold to Cancel</span>
+              </span>
+            </button>
+          </div>
+        `;
+      }
+    } else {
+      // After 24 hours: Show expired cancellation window
+      footerHtml = `
+        <div class="my-order-cancel-wrap my-order-cancel-panel is-expired">
+          <div class="my-order-cancel-main">
+            <div class="my-order-cancel-clock-badge" aria-hidden="true">
+              <svg class="my-order-cancel-clock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+            </div>
+            <div class="my-order-cancel-text-block">
+              <span class="my-order-cancel-title">CANCELLATION WINDOW</span>
+              <div class="my-order-countdown is-expired">
+                <span class="my-order-period-ended">Cancellation period ended</span>
+              </div>
+              <p class="my-order-cancel-policy-hint">You can cancel this order within 24 hours of placing it.</p>
+            </div>
+          </div>
+          <div class="my-order-cancel-divider" aria-hidden="true"></div>
+          <button type="button" class="my-order-hold-cancel-btn is-disabled" disabled aria-disabled="true" aria-label="Cancellation disabled">
             <span class="hold-btn-content">
-              <svg class="hold-btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <svg class="hold-btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="10"/>
                 <line x1="15" y1="9" x2="9" y2="15"/>
                 <line x1="9" y1="9" x2="15" y2="15"/>
@@ -2551,19 +2940,6 @@ function renderCustomerOrdersList(orders) {
               <span class="hold-btn-text">Hold to Cancel</span>
             </span>
           </button>
-        </div>
-      `;
-    } else {
-      // After 24 hours: Replace cancellation button with "Cancellation period expired"
-      footerHtml = `
-        <div class="my-order-cancel-wrap">
-          <span class="my-order-period-ended">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            <span>Cancellation period expired</span>
-          </span>
         </div>
       `;
     }
@@ -2657,16 +3033,27 @@ function renderCustomerOrdersList(orders) {
           <div class="my-order-amount">${escapeHtml(amount)}</div>
         </div>
 
+        ${footerHtml ? `
+        <div class="my-order-card-separator"></div>
         <div class="my-order-action-area">
           ${footerHtml}
+        </div>
+        ` : ''}
+
+        <div class="my-order-card-separator"></div>
+
+        <div class="my-order-delivery-item">
+          <span class="my-order-date-label">Estimated Delivery:</span>
+          <span class="my-order-date-val my-order-delivery-val">${escapeHtml(expectedDeliveryFormatted)}</span>
         </div>
 
         <div class="my-order-card-separator"></div>
 
-        <div class="my-order-bottom-section">
-          <div class="my-order-delivery-item">
-            <span class="my-order-date-label">Estimated Delivery:</span>
-            <span class="my-order-date-val my-order-delivery-val">${escapeHtml(expectedDeliveryFormatted)}</span>
+        <div class="my-order-payment-item">
+          <span class="my-order-date-label">Payment:</span>
+          <div class="my-order-payment-details">
+            <span class="my-order-payment-method">${formatPaymentMethodDisplay(order.paymentMethod)}</span>
+            ${formatPaymentStatusBadge(order.paymentStatus)}
           </div>
         </div>
 
@@ -2776,7 +3163,8 @@ function setupCustomerOrdersListener(userOrCustomer) {
           email: data.email || data.customerEmail || '',
           cancelledBy: data.cancelledBy || '',
           cancelledAt: data.cancelledAt || null,
-          paymentMethod: data.paymentMethod || 'Prepaid / Online',
+          paymentMethod: data.paymentMethod || '',
+          paymentStatus: data.paymentStatus || '',
           address: data.deliveryAddress || data.address || data.fullAddress || '',
           deliveryAddress: data.deliveryAddress || data.address || data.fullAddress || '',
           customisationDetails: data.customisationDetails || null,
@@ -2784,6 +3172,19 @@ function setupCustomerOrdersListener(userOrCustomer) {
           isCustomOrder: Boolean(data.isCustomOrder || data.customisationRequestId)
         });
       });
+      // Merge matching local orders so pending or offline orders are preserved
+      try {
+        const allLocal = getAdminOrders().filter(o =>
+          o.userId === uid || (email && o.customerEmail && o.customerEmail.toLowerCase() === email)
+        );
+        allLocal.forEach(localOrd => {
+          const localId = localOrd.id || localOrd.orderId;
+          if (!fetched.some(f => (f.id || f.orderId) === localId)) {
+            fetched.push(localOrd);
+          }
+        });
+      } catch (e) {}
+
       processAndRender(fetched);
     }, (err) => {
       console.warn('Customer orders listener error:', err);
@@ -2839,9 +3240,17 @@ function updateAuthUI() {
 
     if (navAvatar) {
       if (customer.photoURL) {
-        navAvatar.innerHTML = `<img src="${customer.photoURL}" alt="${displayName}" class="nav-profile-img">`;
+        const img = document.createElement('img');
+        img.src = customer.photoURL;
+        img.alt = displayName || 'User';
+        img.className = 'nav-profile-img';
+        navAvatar.replaceChildren(img);
       } else {
-        navAvatar.innerHTML = `<span class="nav-profile-initial" id="navProfileInitial">${initial}</span>`;
+        const span = document.createElement('span');
+        span.className = 'nav-profile-initial';
+        span.id = 'navProfileInitial';
+        span.textContent = initial || 'J';
+        navAvatar.replaceChildren(span);
       }
     }
 
@@ -2950,8 +3359,8 @@ function openAuthModal(mode = 'login', fromBuyNow = false) {
 }
 
 function closeAuthModal() {
-  stopCancellationCountdownTicker();
   if (!authModalOverlay) return;
+  stopCancellationCountdownTicker();
   authModalOverlay.classList.remove('open');
   const authModalEl = document.querySelector('.auth-modal');
   if (authModalEl) authModalEl.classList.remove('has-user-view');
@@ -3393,6 +3802,27 @@ if (checkoutDeliveryFormEl) {
   checkoutDeliveryFormEl.addEventListener('submit', handleCheckoutSubmit);
 }
 
+// Payment Method option listeners
+const paymentMethodRadios = document.querySelectorAll('input[name="checkoutPaymentMethod"]');
+paymentMethodRadios.forEach(radio => {
+  radio.addEventListener('change', () => {
+    updatePaymentMethodUI(radio.value);
+  });
+});
+
+['labelPaymentCod', 'labelPaymentOnline'].forEach(labelId => {
+  const labelEl = document.getElementById(labelId);
+  if (labelEl) {
+    labelEl.addEventListener('click', () => {
+      const radio = labelEl.querySelector('input[type="radio"]');
+      if (radio) {
+        radio.checked = true;
+        updatePaymentMethodUI(radio.value);
+      }
+    });
+  }
+});
+
 ensureStateOptions();
 
 ['deliveryState', 'deliveryDistrict', 'deliveryCity', 'deliveryArea', 'deliveryPin', 'deliveryAddress', 'deliveryEmail'].forEach(id => {
@@ -3442,8 +3872,6 @@ window.handleCustomerCancelOrder = handleCustomerCancelOrder;
 window.renderCustomerOrdersList = renderCustomerOrdersList;
 window.attachHoldToCancelListeners = attachHoldToCancelListeners;
 window.setupCustomerOrdersListener = setupCustomerOrdersListener;
-window.getAdminOrders = getAdminOrders;
-window.saveAdminOrders = saveAdminOrders;
 window.showAdminDashboard = showAdminDashboard;
 window.renderAdminOrders = renderAdminOrders;
 window.showOrderDetailsModal = showOrderDetailsModal;
@@ -3757,6 +4185,9 @@ const DEFAULT_ADMIN_HELP = [
 ];
 
 function getAdminOrders() {
+  if (sessionStorage.getItem('jayashree_admin_logged') !== 'true') {
+    return [];
+  }
   try {
     const saved = localStorage.getItem('jayashree_orders_store');
     if (saved) return JSON.parse(saved);
@@ -3766,6 +4197,9 @@ function getAdminOrders() {
 }
 
 function saveAdminOrders(orders) {
+  if (sessionStorage.getItem('jayashree_admin_logged') !== 'true') {
+    return;
+  }
   try {
     localStorage.setItem('jayashree_orders_store', JSON.stringify(orders));
   } catch (e) {}
@@ -3859,8 +4293,8 @@ function handleAdminRoute() {
   if (footer) footer.style.display = 'none';
 
   const hash = window.location.hash || '';
-  const isPreview = hash.includes('preview=true') || sessionStorage.getItem('jayashree_admin_logged') === 'true';
-  if (isPreview) {
+  const isAdminLogged = sessionStorage.getItem('jayashree_admin_logged') === 'true';
+  if (isAdminLogged) {
     if (hash.includes('tab=customisation')) {
       currentAdminTab = 'customisation';
     } else if (hash.includes('tab=help')) {
@@ -3968,6 +4402,7 @@ function renderAdminOrders() {
           <col class="col-product-size">
           <col class="col-qty">
           <col class="col-amount">
+          <col class="col-payment">
           <col class="col-date">
           <col class="col-status">
           <col class="col-action">
@@ -3978,6 +4413,7 @@ function renderAdminOrders() {
             <th class="col-product-size">PRODUCT &amp; SIZE</th>
             <th class="col-qty th-center">QTY</th>
             <th class="col-amount">AMOUNT</th>
+            <th class="col-payment">PAYMENT METHOD</th>
             <th class="col-date">ORDER DATE</th>
             <th class="col-status">STATUS</th>
             <th class="col-action th-center">ACTION</th>
@@ -4013,6 +4449,12 @@ function renderAdminOrders() {
                 </td>
                 <td class="admin-td-amount">
                   <span class="admin-amount-text">${escapeHtml(order.amount || order.price || '₹0')}</span>
+                </td>
+                <td class="admin-td-payment">
+                  <div class="admin-payment-info">
+                    <span class="admin-payment-method-name">${formatPaymentMethodDisplay(order.paymentMethod)}</span>
+                    ${formatPaymentStatusBadge(order.paymentStatus)}
+                  </div>
                 </td>
                 <td class="admin-td-date">
                   <span class="admin-date-text">${escapeHtml(simpleDate)}</span>
@@ -4263,7 +4705,16 @@ function renderAdminHelp() {
               <div class="admin-message-preview">${escapeHtml(q.message)}</div>
               <div class="admin-card-bottom">
                 <span class="admin-card-date">Submitted: ${escapeHtml(q.submissionDate)} • ${escapeHtml(q.id)}</span>
-                <button type="button" class="admin-view-btn" data-action="view-help" data-id="${escapeHtml(q.id)}">Read Full Message</button>
+                <div class="admin-card-btn-group">
+                  <button type="button" class="admin-reply-btn" data-action="reply-help" data-id="${escapeHtml(q.id)}" title="Reply to customer via email">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 4px;">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1-0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                      <polyline points="22,6 12,13 2,6"></polyline>
+                    </svg>
+                    <span>Reply via Email</span>
+                  </button>
+                  <button type="button" class="admin-view-btn" data-action="view-help" data-id="${escapeHtml(q.id)}">Read Full Message</button>
+                </div>
               </div>
             </div>
           `;
@@ -4387,10 +4838,14 @@ function showOrderDetailsModal(orderId) {
           <span class="admin-modal-sec-tag">05</span>
           <h4 class="admin-modal-sec-title">PAYMENT</h4>
         </div>
-        <div class="admin-modal-grid-1">
+        <div class="admin-modal-grid-2">
           <div class="admin-modal-item">
             <span class="admin-modal-item-label">Payment Method</span>
-            <span class="admin-modal-item-value">${escapeHtml(order.paymentMethod || 'Prepaid / Online')}</span>
+            <span class="admin-modal-item-value">${formatPaymentMethodDisplay(order.paymentMethod)}</span>
+          </div>
+          <div class="admin-modal-item">
+            <span class="admin-modal-item-label">Payment Status</span>
+            <span class="admin-modal-item-value">${formatPaymentStatusBadge(order.paymentStatus)}</span>
           </div>
         </div>
       </div>
@@ -4588,6 +5043,15 @@ function showHelpDetailsModal(helpId) {
       <div class="admin-detail-block admin-detail-full">
         <span class="admin-detail-label">Complete Message</span>
         <div class="admin-detail-msg-box">${escapeHtml(q.message)}</div>
+      </div>
+      <div class="admin-detail-block admin-detail-full" style="display: flex; justify-content: flex-end; margin-top: 14px;">
+        <button type="button" class="admin-reply-btn" data-action="reply-help" data-id="${escapeHtml(q.id)}" style="padding: 7px 16px; font-size: 13px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;" aria-hidden="true">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+            <polyline points="22,6 12,13 2,6"></polyline>
+          </svg>
+          <span>Reply via Email</span>
+        </button>
       </div>
     </div>
   `;
@@ -4970,8 +5434,8 @@ function setupAdminOrdersListener() {
             status: data.orderStatus || data.status || 'Processing',
             orderStatus: data.orderStatus || data.status || 'Processing',
             customMessage: data.customMessage || data.statusMessage || '',
-            statusMessage: data.statusMessage || data.customMessage || '',
-            paymentMethod: data.paymentMethod || 'Online',
+            paymentMethod: data.paymentMethod || '',
+            paymentStatus: data.paymentStatus || '',
             address: data.deliveryAddress || data.address || data.fullAddress || '—',
             deliveryAddress: data.deliveryAddress || data.address || data.fullAddress || '—',
             expectedDelivery: data.expectedDelivery || data.estimatedDelivery || '',
@@ -5086,8 +5550,8 @@ async function loadAdminDataFromFirestore() {
           status: data.orderStatus || data.status || 'Processing',
           orderStatus: data.orderStatus || data.status || 'Processing',
           customMessage: data.customMessage || data.statusMessage || '',
-          statusMessage: data.statusMessage || data.customMessage || '',
-          paymentMethod: data.paymentMethod || 'Online',
+          paymentMethod: data.paymentMethod || '',
+          paymentStatus: data.paymentStatus || '',
           address: data.deliveryAddress || data.address || data.fullAddress || '—',
           deliveryAddress: data.deliveryAddress || data.address || data.fullAddress || '—',
           expectedDelivery: data.expectedDelivery || data.estimatedDelivery || '',
@@ -5182,10 +5646,146 @@ function closeAdminModal() {
   updateModalLockState();
 }
 
-function escapeHtml(str) {
-  return String(str == null ? '' : str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+let currentReplyHelpId = null;
+
+function extractQueryTopic(q) {
+  if (!q) return 'recent';
+
+  // Combine query and message fields
+  let text = [q.query, q.subject, q.topic, q.title, q.message].filter(Boolean).join(' ').trim();
+  if (!text) return 'recent';
+
+  // 1. Check for slug/code formats like "Help-Inquiry-Bridal-Fittings-1791462360109"
+  const slugRegex = /(?:^(?:help|inquiry|customer|query|ticket)[-_][a-zA-Z0-9\-_]+|[a-zA-Z]+(?:-[a-zA-Z]+)+-\d+)/i;
+  const slugMatch = text.match(slugRegex);
+  if (slugMatch) {
+    let slugTopic = slugMatch[0]
+      .replace(/-\d+$/, '')
+      .replace(/^(?:help|inquiry|customer|query|ticket)[-_]+/i, '')
+      .replace(/[-_]+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    // Specific slug normalizations
+    if (/bridal.*outfit.*size/i.test(slugTopic)) return 'bridal outfit sizing';
+    if (/cotton.*fabric/i.test(slugTopic)) return 'cotton fabric';
+    if (/bridal.*fitting/i.test(slugTopic)) return 'bridal fittings';
+    if (slugTopic.length > 2 && !/\d/.test(slugTopic)) {
+      return slugTopic.replace(/\s+(?:enquiry|inquiry)$/i, '');
+    }
+  }
+
+  const lower = text.toLowerCase();
+
+  // 2. High-signal studio/store topic patterns matching requested examples
+  if (/(?:bridal|wedding).*(?:outfit\s+)?(?:sizes?|sizing)/i.test(lower)) {
+    return 'bridal outfit sizing';
+  }
+  if (/(?:bridal|wedding).*(?:fitting|appointment)|(?:fitting|appointment).*(?:bridal|wedding)/i.test(lower)) {
+    return 'bridal fittings';
+  }
+  if (/cotton\s+(?:fabrics?|materials?)/i.test(lower)) {
+    return 'cotton fabric';
+  }
+  if (/silk\s+(?:fabrics?|sarees?|materials?)/i.test(lower)) {
+    return 'silk fabric';
+  }
+  if (/(?:custom\s+tailored?\s+blouse|fabric.*blouse|blouse\s+tailoring)/i.test(lower)) {
+    return 'custom blouse tailoring';
+  }
+  if (/international\s+shipping/i.test(lower)) {
+    return 'international shipping';
+  }
+  if (/(?:bridal|wedding)\s+(?:wear|lehenga|couture|collection)/i.test(lower)) {
+    return 'bridal wear';
+  }
+  if (/(?:custom\s+tailoring|custom\s+stitching|tailoring\s+process)/i.test(lower)) {
+    return 'custom tailoring';
+  }
+  if (/(?:send.*fabric|fabric\s+material)/i.test(lower)) {
+    return 'fabric tailoring';
+  }
+  if (/(?:shipping|delivery|dispatch)/i.test(lower)) {
+    return 'order delivery';
+  }
+  if (/fitting\s+appointment/i.test(lower)) {
+    return 'fitting appointment';
+  }
+  if (/(?:size|sizing|measurements?)/i.test(lower)) {
+    return 'sizing and measurements';
+  }
+
+  // 3. Natural language fallback: clean sentence & strip conversational filler and IDs
+  let cleaned = text
+    .replace(/\b(?:HELP|REQ|ORD|ID)?[-_]?\d{3,}\b/gi, '') // Remove IDs / timestamps
+    .replace(/#\d+/g, '')
+    .replace(/^(?:hello|hi|dear|hey|greetings)(?:\s+[\w\s]+)?[\,\.\-\!\:]*\s*/i, '')
+    .replace(/^(?:i\s+(?:would\s+like|want)\s+to\s+(?:know|inquire|ask)|can\s+(?:i|you)|please\s+(?:let\s+me\s+know|confirm|tell\s+me)|i\s+placed\s+an\s+enquiry\s+for|inquiry\s+regarding|question\s+about)\s+/i, '')
+    .trim();
+
+  // Extract first 2-5 words of the core query
+  const words = cleaned.split(/\s+/).filter(w => w.length > 0 && !/^\d+$/.test(w));
+  if (words.length > 0) {
+    let candidate = words.slice(0, Math.min(4, words.length)).join(' ').toLowerCase();
+    candidate = candidate.replace(/[^\w\s\-]/g, '').replace(/\s+(?:enquiry|inquiry)$/i, '').trim();
+    if (candidate.length >= 3) {
+      return candidate;
+    }
+  }
+
+  return 'recent';
+}
+
+function generateHelpEmailSubject(q) {
+  const topic = extractQueryTopic(q);
+  return `Update on your ${topic} enquiry`;
+}
+
+function openAdminReplyModal(helpId) {
+  const queries = getAdminHelp();
+  const q = queries.find(item => item.id === helpId);
+  if (!q) return;
+
+  currentReplyHelpId = helpId;
+  const overlay = document.getElementById('adminReplyModalOverlay');
+  const recipientInput = document.getElementById('adminReplyRecipient');
+  const subjectInput = document.getElementById('adminReplySubject');
+  const messageTextarea = document.getElementById('adminReplyMessage');
+  const feedbackEl = document.getElementById('adminReplyFeedback');
+
+  const customerEmail = (q.email && q.email !== '—' && q.email !== 'Not provided') ? q.email : '';
+  if (recipientInput) recipientInput.value = customerEmail;
+  if (subjectInput) subjectInput.value = generateHelpEmailSubject(q);
+  if (messageTextarea) {
+    messageTextarea.value = `Dear ${q.customerName || 'Customer'},\n\nThank you for reaching out to Jayashree Help Centre.\n\n\n\nBest regards,\nJayashree`;
+  }
+  if (feedbackEl) {
+    feedbackEl.style.display = 'none';
+    feedbackEl.textContent = '';
+    feedbackEl.className = 'admin-reply-feedback';
+  }
+
+  if (overlay) overlay.style.display = 'flex';
+  updateModalLockState();
+
+  setTimeout(() => {
+    if (recipientInput && !recipientInput.value) {
+      recipientInput.focus();
+    } else if (messageTextarea) {
+      messageTextarea.focus();
+      const pos = messageTextarea.value.indexOf('\n\n\n') + 2;
+      if (pos > 1) {
+        messageTextarea.setSelectionRange(pos, pos);
+      }
+    }
+  }, 60);
+}
+
+function closeAdminReplyModal() {
+  const overlay = document.getElementById('adminReplyModalOverlay');
+  if (overlay) overlay.style.display = 'none';
+  currentReplyHelpId = null;
+  updateModalLockState();
 }
 
 // Navigation Tab Click Listeners
@@ -5196,10 +5796,72 @@ document.getElementById('adminTabHelp')?.addEventListener('click', () => switchA
 // Modal Close Listeners
 document.getElementById('adminModalCloseBtn')?.addEventListener('click', closeAdminModal);
 document.getElementById('adminModalOverlay')?.addEventListener('click', (e) => {
+  const replyBtn = e.target.closest('[data-action="reply-help"]');
+  if (replyBtn) {
+    const id = replyBtn.dataset.id;
+    closeAdminModal();
+    openAdminReplyModal(id);
+    return;
+  }
   if (e.target.id === 'adminModalOverlay') closeAdminModal();
 });
+
+// Reply Modal Listeners
+document.getElementById('adminReplyModalCloseBtn')?.addEventListener('click', closeAdminReplyModal);
+document.getElementById('adminReplyCancelBtn')?.addEventListener('click', closeAdminReplyModal);
+document.getElementById('adminReplyModalOverlay')?.addEventListener('click', (e) => {
+  if (e.target.id === 'adminReplyModalOverlay') closeAdminReplyModal();
+});
+
+// Send via Gmail Listener
+document.getElementById('adminReplySendGmailBtn')?.addEventListener('click', () => {
+  const recipientInput = document.getElementById('adminReplyRecipient');
+  const subjectInput = document.getElementById('adminReplySubject');
+  const messageTextarea = document.getElementById('adminReplyMessage');
+  const feedbackEl = document.getElementById('adminReplyFeedback');
+
+  const to = (recipientInput?.value || '').trim();
+  const subject = (subjectInput?.value || '').trim();
+  const message = messageTextarea?.value || '';
+
+  if (!to) {
+    if (feedbackEl) {
+      feedbackEl.textContent = 'Please enter the customer\'s email address.';
+      feedbackEl.className = 'admin-reply-feedback error';
+      feedbackEl.style.display = 'block';
+    }
+    recipientInput?.focus();
+    return;
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(to)) {
+    if (feedbackEl) {
+      feedbackEl.textContent = 'Please enter a valid email address.';
+      feedbackEl.className = 'admin-reply-feedback error';
+      feedbackEl.style.display = 'block';
+    }
+    recipientInput?.focus();
+    return;
+  }
+
+  // Hide any previous error banner
+  if (feedbackEl) {
+    feedbackEl.style.display = 'none';
+    feedbackEl.textContent = '';
+  }
+
+  // Target the designerjayashree9@gmail.com account in Gmail
+  const senderAccount = 'designerjayashree9@gmail.com';
+  const gmailUrl = `https://mail.google.com/mail/u/${encodeURIComponent(senderAccount)}/?view=cm&fs=1&authuser=${encodeURIComponent(senderAccount)}&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
+  window.open(gmailUrl, '_blank', 'noopener,noreferrer');
+});
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeAdminModal();
+  if (e.key === 'Escape') {
+    closeAdminModal();
+    closeAdminReplyModal();
+  }
 });
 
 // Card Action Delegation
@@ -5211,6 +5873,7 @@ document.querySelector('.admin-main-card')?.addEventListener('click', (e) => {
   if (action === 'view-order') showOrderDetailsModal(id);
   else if (action === 'view-customisation') showCustomisationDetailsModal(id);
   else if (action === 'view-help') showHelpDetailsModal(id);
+  else if (action === 'reply-help') openAdminReplyModal(id);
 });
 
 // Admin Login Form
@@ -5241,7 +5904,7 @@ if (adminLoginForm) {
       const user = cred.user;
 
       // Authorisation check: must be in admins collection or known admin email
-      let isAuthorized = (email === 'designerjayashree9@gmail.com' || email === 'admin@jayashreefashion.com' || email === 'admin@example.com');
+      let isAuthorized = (email === 'designerjayashree9@gmail.com' || email === 'admin@jayashreefashion.com');
       if (!isAuthorized && window.fbDb) {
         try {
           const adminDocSnap = await window.fbFns.getDoc(window.fbFns.doc(window.fbDb, 'admins', user.uid));
@@ -5265,11 +5928,6 @@ if (adminLoginForm) {
       await loadAdminDataFromFirestore();
     } catch (err) {
       console.error('Admin login error:', err);
-      if (email === 'admin@example.com' && password === 'admin123') {
-        sessionStorage.setItem('jayashree_admin_logged', 'true');
-        showAdminDashboard();
-        return;
-      }
       if (errEl) {
         let msg = 'Invalid admin credentials.';
         if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
@@ -5347,6 +6005,23 @@ if (!location.hash) {
   location.hash = '#/';
 }
 navigate();
+
+if (window.history.state && window.history.state.popup === 'collection') {
+  openCollectionPopup(true, false);
+}
+
+// Explicit window exports for module helpers
+window.updatePaymentMethodUI = updatePaymentMethodUI;
+window.handleCheckoutSubmit = handleCheckoutSubmit;
+window.executeOrderPayment = executeOrderPayment;
+window.openCheckoutModal = openCheckoutModal;
+window.closeCheckoutModal = closeCheckoutModal;
+window.setCustomerSession = setCustomerSession;
+window.showAdminDashboard = showAdminDashboard;
+window.loadAdminDataFromFirestore = loadAdminDataFromFirestore;
+window.switchAdminTab = switchAdminTab;
+window.renderCustomerOrdersList = renderCustomerOrdersList;
+window.openAuthModal = openAuthModal;
 
 // ==========================================================================
 // JAYASHREE RULE-BASED FASHION CHATBOT INITIALIZATION
@@ -5479,26 +6154,101 @@ function initJayashreeChatbot() {
     return msgEl;
   }
 
-  function handleUserInput(questionText) {
+  const clientChatHistory = [];
+
+  function showTypingIndicator() {
+    const typingEl = document.createElement('div');
+    typingEl.className = 'chat-msg bot-msg chat-typing-msg';
+    const bubbleEl = document.createElement('div');
+    bubbleEl.className = 'chat-msg-bubble chat-typing-bubble';
+    bubbleEl.innerHTML = '<span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span>';
+    typingEl.appendChild(bubbleEl);
+    messagesContainer.appendChild(typingEl);
+    scrollChatToBottom();
+    return typingEl;
+  }
+
+  function removeTypingIndicator(typingEl) {
+    if (typingEl && typingEl.parentNode) {
+      typingEl.parentNode.removeChild(typingEl);
+    }
+  }
+
+  async function handleUserInput(questionText) {
     const q = (questionText || input.value || '').trim();
     if (!q) return;
 
     const userMsgEl = appendMessage('user', q);
     input.value = '';
+    clientChatHistory.push({ role: 'user', content: q });
 
-    // Evaluate rule-based response instantly (zero network latency)
+    // 1. Evaluate deterministic rule-based response first (0ms latency, zero API cost)
+    let evaluation = null;
     try {
-      const evaluation = evaluateRuleChatbot(q);
-      setTimeout(() => {
-        const botMsgEl = appendMessage('bot', evaluation.answer);
-        scrollChatToLatestExchange(userMsgEl, botMsgEl);
-      }, 80);
+      evaluation = evaluateRuleChatbot(q);
     } catch (err) {
       console.error('Chatbot rule evaluation error:', err);
+    }
+
+    const isDeterministicSuccess = evaluation && 
+      evaluation.intent && 
+      evaluation.intent !== 'fashion_query_unavailable' && 
+      evaluation.intent !== 'unrecognized_refusal';
+
+    if (isDeterministicSuccess) {
       setTimeout(() => {
-        const botMsgEl = appendMessage('bot', "I'm sorry, that information isn't available on our website. Please contact the Jayashree team for assistance.");
+        const botMsgEl = appendMessage('bot', evaluation.answer);
+        clientChatHistory.push({ role: 'assistant', content: evaluation.answer });
         scrollChatToLatestExchange(userMsgEl, botMsgEl);
       }, 80);
+      return;
+    }
+
+    // 2. For queries needing AI or authenticated order assistance, call secure backend endpoint
+    const typingEl = showTypingIndicator();
+    let authToken = null;
+    try {
+      if (window.fbAuth?.currentUser) {
+        authToken = await window.fbAuth.currentUser.getIdToken();
+      }
+    } catch (tokenErr) {
+      console.warn('Could not retrieve Firebase auth token for chatbot:', tokenErr);
+    }
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+        },
+        body: JSON.stringify({
+          message: q,
+          history: clientChatHistory.slice(-4)
+        })
+      });
+
+      removeTypingIndicator(typingEl);
+
+      if (res.ok) {
+        const data = await res.json();
+        const replyText = data.answer || evaluation?.answer || "I'm here to help with Jayashree's collections and policies. How can I assist you?";
+        const botMsgEl = appendMessage('bot', replyText);
+        clientChatHistory.push({ role: 'assistant', content: replyText });
+        scrollChatToLatestExchange(userMsgEl, botMsgEl);
+      } else {
+        const fallbackText = evaluation?.answer || "I'm sorry, I'm currently unable to process your request. Please visit our [Help Centre](#/help) or contact us at +91 9177976293.";
+        const botMsgEl = appendMessage('bot', fallbackText);
+        clientChatHistory.push({ role: 'assistant', content: fallbackText });
+        scrollChatToLatestExchange(userMsgEl, botMsgEl);
+      }
+    } catch (networkErr) {
+      console.warn('Chatbot backend request failed, using local rule fallback:', networkErr);
+      removeTypingIndicator(typingEl);
+      const fallbackText = evaluation?.answer || "I'm sorry, that information isn't available on our website. Please contact the Jayashree team for assistance.";
+      const botMsgEl = appendMessage('bot', fallbackText);
+      clientChatHistory.push({ role: 'assistant', content: fallbackText });
+      scrollChatToLatestExchange(userMsgEl, botMsgEl);
     }
   }
 
