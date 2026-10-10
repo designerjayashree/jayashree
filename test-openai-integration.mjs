@@ -18,11 +18,14 @@ function assert(condition, testName, details = '') {
   }
 }
 
+let testReqCounter = 0;
 async function postChat(body, headers = {}) {
+  testReqCounter++;
   const res = await fetch('http://localhost:3000/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'X-Forwarded-For': `127.0.0.${testReqCounter}`,
       ...headers
     },
     body: JSON.stringify(body)

@@ -754,7 +754,141 @@ function restorePendingOrderDetails(order, authEmail) {
   updateCheckoutSummaryFields();
 }
 
-async function finalizeAndSaveOrder({ orderPayload, paymentMethod, paymentStatus, razorpayData }) {
+/**
+ * Resolves Razorpay payment method names and variations to official refund timeframes
+ * 
+ * Supported categories:
+ * - UPI: 2 to 7 days ("UPI: Refunds typically take 2 to 7 days.")
+ * - Credit / Debit Cards: 5 to 10 days ("Credit / Debit Cards: Refunds typically take 5 to 10 days.")
+ * - Net Banking: 2 to 10 days ("Net Banking: Refunds typically take 2 to 10 days.")
+ * - Wallets: 0 to 3 days ("Wallets: Refunds typically take 0 to 3 days.")
+ * - Unidentified: Neutral support message
+ */
+function resolveRazorpayPaymentMethod(input) {
+  if (!input) {
+    return {
+      category: 'unknown',
+      label: 'Online Payment',
+      timeline: null,
+      refundMessage: 'Refunds: Please contact support for refund timeframe assistance.',
+      isIdentified: false
+    };
+  }
+
+  let methodStr = '';
+  if (typeof input === 'string') {
+    methodStr = input.trim().toLowerCase();
+  } else if (typeof input === 'object') {
+    const rzpMethod = (input.method || input.paymentMethod || input.payment_method || '').toLowerCase();
+    const cardType = (input.card?.type || input.card_type || '').toLowerCase();
+    const walletName = (input.wallet || '').toLowerCase();
+    const bankName = (input.bank || '').toLowerCase();
+    methodStr = `${rzpMethod} ${cardType} ${walletName} ${bankName}`.trim().toLowerCase();
+  }
+
+  // 1. Wallets: 0 to 3 days
+  if (
+    methodStr.includes('wallet') ||
+    methodStr.includes('paytm') ||
+    methodStr.includes('mobikwik') ||
+    methodStr.includes('freecharge') ||
+    methodStr.includes('olamoney') ||
+    methodStr.includes('amazonpay') ||
+    methodStr.includes('amazon pay') ||
+    methodStr.includes('phonepe wallet')
+  ) {
+    return {
+      category: 'wallet',
+      label: 'Wallets',
+      timeline: '0 to 3 days',
+      refundMessage: 'Wallets: Refunds typically take 0 to 3 days.',
+      isIdentified: true
+    };
+  }
+
+  // 2. UPI: 2 to 7 days
+  if (
+    methodStr.includes('upi') ||
+    methodStr.includes('gpay') ||
+    methodStr.includes('google pay') ||
+    methodStr.includes('phonepe') ||
+    methodStr.includes('bhim') ||
+    methodStr.includes('@')
+  ) {
+    return {
+      category: 'upi',
+      label: 'UPI',
+      timeline: '2 to 7 days',
+      refundMessage: 'UPI: Refunds typically take 2 to 7 days.',
+      isIdentified: true
+    };
+  }
+
+  // 3. Net Banking: 2 to 10 days
+  if (
+    methodStr.includes('netbanking') ||
+    methodStr.includes('net banking') ||
+    methodStr.includes('net_banking') ||
+    methodStr.includes('net-banking') ||
+    methodStr === 'nb'
+  ) {
+    return {
+      category: 'netbanking',
+      label: 'Net Banking',
+      timeline: '2 to 10 days',
+      refundMessage: 'Net Banking: Refunds typically take 2 to 10 days.',
+      isIdentified: true
+    };
+  }
+
+  // 4. Credit / Debit Cards: 5 to 10 days
+  if (
+    methodStr.includes('card') ||
+    methodStr.includes('credit') ||
+    methodStr.includes('debit') ||
+    methodStr.includes('visa') ||
+    methodStr.includes('mastercard') ||
+    methodStr.includes('rupay') ||
+    methodStr.includes('amex') ||
+    methodStr.includes('diners')
+  ) {
+    return {
+      category: 'card',
+      label: 'Credit / Debit Cards',
+      timeline: '5 to 10 days',
+      refundMessage: 'Credit / Debit Cards: Refunds typically take 5 to 10 days.',
+      isIdentified: true
+    };
+  }
+
+  // 5. Cash on Delivery
+  if (
+    methodStr === 'cod' ||
+    methodStr === 'cash on delivery' ||
+    methodStr.includes('cash on delivery') ||
+    methodStr.includes('pay on delivery')
+  ) {
+    return {
+      category: 'cod',
+      label: 'Cash on Delivery',
+      timeline: null,
+      refundMessage: null,
+      isIdentified: true
+    };
+  }
+
+  // 6. Unknown / Unidentified method
+  return {
+    category: 'unknown',
+    label: 'Online Payment',
+    timeline: null,
+    refundMessage: 'Refunds: Please contact support for refund timeframe assistance.',
+    isIdentified: false
+  };
+}
+window.resolveRazorpayPaymentMethod = resolveRazorpayPaymentMethod;
+
+async function finalizeAndSaveOrder({ orderPayload, paymentMethod, paymentStatus, razorpayData, refundTimeframe, refundMessage, isIdentified }) {
   const deliveryView = document.getElementById('checkoutDeliveryView');
   const successView = document.getElementById('checkoutSuccessView');
 
@@ -778,6 +912,8 @@ async function finalizeAndSaveOrder({ orderPayload, paymentMethod, paymentStatus
   const payMethodEl = document.getElementById('confirmPaymentMethod');
   const payStatusEl = document.getElementById('confirmPaymentStatus');
   const confirmSuccessSub = document.getElementById('confirmSuccessSub');
+  const refundBoxEl = document.getElementById('confirmRefundTimeframeBox');
+  const refundTextEl = document.getElementById('confirmRefundTimeframeText');
 
   const customer = typeof getCustomerSession === 'function' ? getCustomerSession() : null;
   const currentUser = window.fbAuth?.currentUser;
@@ -785,20 +921,52 @@ async function finalizeAndSaveOrder({ orderPayload, paymentMethod, paymentStatus
   const finalUid = currentUser?.uid || customer?.uid || 'guest';
   const formattedPrice = formatPrice(orderPayload.purchase?.price);
 
+  // Resolve verified payment method and refund timeframe
+  const isCod = paymentMethod === 'Cash on Delivery';
+  const methodInput = razorpayData?.method || razorpayData?.paymentMethod || (isCod ? 'cod' : paymentMethod);
+  const resolvedPayment = resolveRazorpayPaymentMethod(methodInput);
+
+  const displayPaymentMethod = isCod
+    ? 'Cash on Delivery'
+    : (resolvedPayment.isIdentified ? resolvedPayment.label : (paymentMethod || 'Online Payment'));
+
+  const finalRefundTimeframe = refundTimeframe || razorpayData?.refundTimeframe || resolvedPayment.timeline || null;
+  const finalRefundMessage = refundMessage || razorpayData?.refundMessage || resolvedPayment.refundMessage || null;
+  const methodIdentified = typeof isIdentified === 'boolean' ? isIdentified : resolvedPayment.isIdentified;
+
   if (orderIdEl) orderIdEl.textContent = `#${fourDigitOrderNumber}`;
   if (productEl) productEl.textContent = orderPayload.purchase?.design || 'Designer Outfit';
   if (sizeEl) sizeEl.textContent = orderPayload.purchase?.size || 'Standard';
   if (amountEl) amountEl.textContent = formattedPrice;
   if (addrEl) addrEl.textContent = orderPayload.formattedAddress;
   if (emailEl) emailEl.textContent = finalEmail;
-  if (payMethodEl) payMethodEl.textContent = paymentMethod;
+  if (payMethodEl) payMethodEl.textContent = displayPaymentMethod;
   if (payStatusEl) {
-    payStatusEl.textContent = paymentMethod === 'Cash on Delivery' ? 'Pending (Pay on delivery)' : 'Paid';
+    payStatusEl.textContent = isCod ? 'Pending (Pay on delivery)' : 'Paid';
   }
   if (confirmSuccessSub) {
-    confirmSuccessSub.textContent = paymentMethod === 'Cash on Delivery'
+    confirmSuccessSub.textContent = isCod
       ? 'Your order has been placed successfully. Payment is due upon delivery.'
       : 'Your payment was successful.';
+  }
+
+  // Display only the matching refund timeframe for verified online payments
+  if (isCod) {
+    if (refundBoxEl) refundBoxEl.style.display = 'none';
+  } else {
+    if (refundBoxEl && refundTextEl) {
+      if (finalRefundMessage) {
+        refundTextEl.textContent = finalRefundMessage;
+        if (!methodIdentified) {
+          refundTextEl.classList.add('is-neutral');
+        } else {
+          refundTextEl.classList.remove('is-neutral');
+        }
+        refundBoxEl.style.display = 'block';
+      } else {
+        refundBoxEl.style.display = 'none';
+      }
+    }
   }
 
   const confirmEstimateEl = document.getElementById('confirmEstimate');
@@ -830,13 +998,16 @@ async function finalizeAndSaveOrder({ orderPayload, paymentMethod, paymentStatus
     fullAddress: orderPayload.fullAddress || '',
     address: orderPayload.formattedAddress || '',
     estimatedDelivery: orderPayload.estimatedDelivery || '',
-    paymentMethod: paymentMethod, // 'Cash on Delivery' or 'Online Payment'
+    paymentMethod: displayPaymentMethod, // e.g. 'UPI', 'Credit / Debit Cards', 'Net Banking', 'Wallets', 'Cash on Delivery'
     paymentStatus: paymentStatus, // 'Pending' or 'Paid'
     orderStatus: 'Processing',
     status: 'Processing',
     customMessage: '',
     razorpayOrderId: razorpayData?.orderId || '',
     razorpayPaymentId: razorpayData?.paymentId || '',
+    razorpayMethod: razorpayData?.method || (resolvedPayment.isIdentified ? resolvedPayment.category : ''),
+    refundTimeframe: finalRefundTimeframe || '',
+    refundMessage: finalRefundMessage || '',
     date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
     createdAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString(),
     updatedAt: window.fbFns?.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString()
@@ -959,6 +1130,42 @@ async function finalizeAndSaveOrder({ orderPayload, paymentMethod, paymentStatus
     }
   } catch (e) {
     console.warn('Local admin orders save error:', e);
+  }
+
+  // Dispatch customer order confirmation email via Gmail REST API upon Razorpay payment
+  if (finalEmail && finalEmail.includes('@') && (paymentStatus === 'Paid' || razorpayData)) {
+    try {
+      fetch('/api/orders/confirmation-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          orderNumber: fourDigitOrderNumber,
+          customerEmail: finalEmail,
+          customerName: firestoreOrder.customerName,
+          product: firestoreOrder.productName,
+          size: firestoreOrder.size,
+          amount: formattedPrice,
+          paymentMethod: displayPaymentMethod,
+          deliveryAddress: orderPayload.formattedAddress,
+          estimatedDelivery: orderPayload.estimatedDelivery || '',
+          razorpayPaymentId: razorpayData?.paymentId || ''
+        })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.emailSent) {
+          console.log(`✓ Order confirmation email successfully sent to ${finalEmail} for order #${fourDigitOrderNumber}`);
+        } else {
+          console.warn('Order confirmation email response:', data.error || data.message);
+        }
+      })
+      .catch(emailErr => {
+        console.warn('Order confirmation email network dispatch error:', emailErr);
+      });
+    } catch (dispErr) {
+      console.warn('Could not dispatch order confirmation email:', dispErr);
+    }
   }
 
   try {
@@ -1097,12 +1304,20 @@ async function executeOrderPayment(orderPayload) {
           if (verifyRes.ok && verifyData.success && verifyData.verified) {
             await finalizeAndSaveOrder({
               orderPayload,
-              paymentMethod: 'Online Payment',
+              paymentMethod: verifyData.paymentMethod || 'Online Payment',
               paymentStatus: 'Paid',
+              refundTimeframe: verifyData.refundTimeframe,
+              refundMessage: verifyData.refundMessage,
+              isIdentified: verifyData.isIdentified,
               razorpayData: {
                 orderId: response.razorpay_order_id,
                 paymentId: response.razorpay_payment_id,
-                signature: response.razorpay_signature
+                signature: response.razorpay_signature,
+                method: verifyData.rawMethod || verifyData.methodCategory,
+                paymentMethod: verifyData.paymentMethod,
+                refundTimeframe: verifyData.refundTimeframe,
+                refundMessage: verifyData.refundMessage,
+                isIdentified: verifyData.isIdentified
               }
             });
           } else {
@@ -2461,18 +2676,18 @@ function updateCancellationCountdowns() {
                 <div class="my-order-countdown is-expired">
                   <span class="my-order-period-ended">Cancellation period ended</span>
                 </div>
-                <p class="my-order-cancel-policy-hint">You can cancel this order within 24 hours of placing it.</p>
+                <p class="my-order-cancel-policy-hint">Orders can only be cancelled within 24 hours of placing them.</p>
               </div>
             </div>
             <div class="my-order-cancel-divider" aria-hidden="true"></div>
-            <button type="button" class="my-order-hold-cancel-btn is-disabled" disabled aria-disabled="true" aria-label="Cancellation disabled">
+            <button type="button" class="my-order-hold-cancel-btn is-disabled" disabled aria-disabled="true" aria-label="Cancellation period ended">
               <span class="hold-btn-content">
                 <svg class="hold-btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="12" cy="12" r="10"/>
                   <line x1="15" y1="9" x2="9" y2="15"/>
                   <line x1="9" y1="9" x2="15" y2="15"/>
                 </svg>
-                <span class="hold-btn-text">Hold to Cancel</span>
+                <span class="hold-btn-text">Cancellation Closed</span>
               </span>
             </button>
           </div>
@@ -2535,15 +2750,15 @@ async function executeCustomerOrderCancellation(orderId, btn) {
     renderCustomerOrdersList(currentCustomerOrders);
     return;
   }
-  if (status === 'delivered') {
-    alert('Delivered orders cannot be cancelled.');
+  if (['shipped', 'out for delivery', 'delivered'].includes(status)) {
+    alert(`Orders in '${order.status || order.orderStatus}' status cannot be cancelled per store policy.`);
     renderCustomerOrdersList(currentCustomerOrders);
     return;
   }
 
   // 3. 24-Hour Rule Validation: Cannot cancel after 24 hours
   if (!isOrderCancellable(order)) {
-    alert('This order cannot be cancelled as the 24-hour cancellation period has expired.');
+    alert('Orders can only be cancelled within 24 hours of placing them.');
     renderCustomerOrdersList(currentCustomerOrders);
     return;
   }
@@ -2770,6 +2985,167 @@ function attachHoldToCancelListeners(container) {
   });
 }
 
+/**
+ * Resolves refund details for cancelled orders based on payment method and status
+ */
+function getRefundDetails(order) {
+  if (!order) return null;
+  const rawStatus = (order.status || order.orderStatus || '').trim().toLowerCase();
+  if (rawStatus !== 'cancelled') {
+    return null;
+  }
+
+  const payMethod = (order.paymentMethod || '').trim();
+  const lowerMethod = payMethod.toLowerCase();
+
+  // Check if Cash on Delivery
+  const isCod = lowerMethod === 'cod' ||
+                lowerMethod === 'cash on delivery' ||
+                lowerMethod.includes('cash on delivery') ||
+                lowerMethod.includes('pay on delivery');
+
+  const payStatus = (order.paymentStatus || '').trim().toLowerCase();
+  const isPaid = payStatus === 'paid' ||
+                 payStatus === 'completed' ||
+                 order.isPaid === true ||
+                 (lowerMethod.startsWith('prepaid') && payStatus !== 'failed' && payStatus !== 'pending' && payStatus !== 'unpaid') ||
+                 (Boolean(order.razorpayPaymentId) && payStatus !== 'failed');
+
+  // Rule: For Cash on Delivery orders that have not been paid, do not display a refund timeline.
+  if (isCod && !isPaid) {
+    return null;
+  }
+
+  // Unpaid online orders (e.g. failed payment) also require no refund timeline
+  if (!isPaid) {
+    return null;
+  }
+
+  // Resolve payment method category and timeline
+  const resolved = resolveRazorpayPaymentMethod(order.paymentMethod || order.razorpayMethod || order.paymentDetails);
+  const { category, label, timeline, refundMessage, isIdentified } = resolved;
+
+  // Check refund status
+  const rawRefundStatus = (order.refundStatus || '').trim().toLowerCase();
+  const isInitiated = rawRefundStatus === 'initiated' ||
+                      rawRefundStatus === 'processing' ||
+                      rawRefundStatus === 'completed' ||
+                      rawRefundStatus === 'refunded' ||
+                      Boolean(order.refundInitiatedAt || order.refundDate || order.refundInitiationDate);
+
+  // Format initiation date if available
+  let initiationDateFormatted = '';
+  const dateVal = order.refundInitiatedAt || order.refundDate || order.refundInitiationDate;
+  if (dateVal) {
+    if (typeof dateVal === 'string') {
+      try {
+        const d = new Date(dateVal);
+        if (!isNaN(d.getTime())) {
+          initiationDateFormatted = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        } else {
+          initiationDateFormatted = dateVal;
+        }
+      } catch (e) {
+        initiationDateFormatted = dateVal;
+      }
+    } else if (typeof dateVal === 'object' && dateVal.seconds) {
+      const d = new Date(dateVal.seconds * 1000);
+      initiationDateFormatted = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+  }
+
+  return {
+    isPaid,
+    methodCategory: category,
+    methodLabel: label,
+    timeline,
+    expectedTimelineText: timeline ? `Expected refund timeline: ${timeline}` : '',
+    refundMessage,
+    isIdentified,
+    isInitiated,
+    rawRefundStatus: order.refundStatus || (isInitiated ? 'Initiated' : 'Pending'),
+    initiationDate: initiationDateFormatted
+  };
+}
+
+function formatRefundInfoHtml(order) {
+  const info = getRefundDetails(order);
+  if (!info) return '';
+
+  if (info.isInitiated) {
+    // Refund initiated: Show badge, initiation date where available, and applicable timeline
+    const timelineHtml = info.timeline
+      ? `<div class="my-order-refund-row">
+           <span class="my-order-refund-label">Expected refund timeline:</span>
+           <span class="my-order-refund-val my-order-refund-timeline-highlight">${escapeHtml(info.timeline)}</span>
+         </div>
+         ${info.refundMessage ? `<div class="my-order-refund-note" style="margin-top: 4px; font-size: 11.5px; color: #5c544d;">${escapeHtml(info.refundMessage)}</div>` : ''}`
+      : `<div class="my-order-refund-row">
+           <span class="my-order-refund-label">Refund details:</span>
+           <span class="my-order-refund-val">${escapeHtml(info.refundMessage || 'Please contact support for refund timeframe assistance.')}</span>
+         </div>`;
+
+    const dateHtml = info.initiationDate
+      ? `<div class="my-order-refund-row">
+           <span class="my-order-refund-label">Initiated on:</span>
+           <span class="my-order-refund-val">${escapeHtml(info.initiationDate)}</span>
+         </div>`
+      : '';
+
+    return `
+      <div class="my-order-card-separator"></div>
+      <div class="my-order-refund-box">
+        <div class="my-order-refund-header">
+          <div class="my-order-refund-title-wrap">
+            <svg class="my-order-refund-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+            <span class="my-order-refund-title">Refund Information</span>
+          </div>
+          <span class="my-order-refund-badge is-initiated">Refund Initiated</span>
+        </div>
+        <div class="my-order-refund-content">
+          ${dateHtml}
+          ${timelineHtml}
+        </div>
+      </div>
+    `;
+  } else {
+    // Refund pending initiation: Explain accurately without implying countdown has started
+    const timelineNote = info.timeline
+      ? `<div class="my-order-refund-row">
+           <span class="my-order-refund-label">Applicable timeline once initiated:</span>
+           <span class="my-order-refund-val">${escapeHtml(info.timeline)}</span>
+         </div>
+         ${info.refundMessage ? `<div class="my-order-refund-note" style="margin-top: 4px; font-size: 11.5px; color: #5c544d;">${escapeHtml(info.refundMessage)}</div>` : ''}`
+      : `<div class="my-order-refund-row">
+           <span class="my-order-refund-label">Refund details:</span>
+           <span class="my-order-refund-val">${escapeHtml(info.refundMessage || 'Please contact support for refund timeframe assistance.')}</span>
+         </div>`;
+
+    return `
+      <div class="my-order-card-separator"></div>
+      <div class="my-order-refund-box is-pending">
+        <div class="my-order-refund-header">
+          <div class="my-order-refund-title-wrap">
+            <svg class="my-order-refund-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span class="my-order-refund-title">Refund Information</span>
+          </div>
+          <span class="my-order-refund-badge is-pending">Pending Initiation</span>
+        </div>
+        <div class="my-order-refund-content">
+          <p class="my-order-refund-note">Refund has not yet been initiated. Once approved and initiated by Jayashree, your refund will be processed back to your original payment method.</p>
+          ${timelineNote}
+        </div>
+      </div>
+    `;
+  }
+}
+
 function renderCustomerOrdersList(orders) {
   stopCancellationCountdownTicker();
   if (Array.isArray(orders)) {
@@ -2814,6 +3190,9 @@ function renderCustomerOrdersList(orders) {
     const cancellable = isOrderCancellable(order);
     const isCancelled = rawStatus.toLowerCase() === 'cancelled';
     const isDelivered = rawStatus.toLowerCase() === 'delivered';
+    const isShipped = rawStatus.toLowerCase() === 'shipped';
+    const isOutForDelivery = rawStatus.toLowerCase() === 'out for delivery';
+    const isIneligibleStatus = isDelivered || isShipped || isOutForDelivery;
 
     // Reliable identification of customisation orders vs normal catalogue orders
     const isCustom = Boolean(
@@ -2840,44 +3219,13 @@ function renderCustomerOrdersList(orders) {
           </div>
         </div>
       `;
-    } else if (isDelivered) {
-      // Delivered order cannot be cancelled
+    } else if (isIneligibleStatus) {
+      // Shipped, out for delivery, and delivered orders cannot be cancelled per store policy
       footerHtml = '';
-    } else if (cancellable) {
+    } else {
       const countdown = formatRemainingCancellationTime(createdMs);
-      if (countdown.expired) {
-        footerHtml = `
-          <div class="my-order-cancel-wrap my-order-cancel-panel is-expired">
-            <div class="my-order-cancel-main">
-              <div class="my-order-cancel-clock-badge" aria-hidden="true">
-                <svg class="my-order-cancel-clock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10"/>
-                  <polyline points="12 6 12 12 16 14"/>
-                </svg>
-              </div>
-              <div class="my-order-cancel-text-block">
-                <span class="my-order-cancel-title">CANCELLATION WINDOW</span>
-                <div class="my-order-countdown is-expired">
-                  <span class="my-order-period-ended">Cancellation period ended</span>
-                </div>
-                <p class="my-order-cancel-policy-hint">You can cancel this order within 24 hours of placing it.</p>
-              </div>
-            </div>
-            <div class="my-order-cancel-divider" aria-hidden="true"></div>
-            <button type="button" class="my-order-hold-cancel-btn is-disabled" disabled aria-disabled="true" aria-label="Cancellation disabled">
-              <span class="hold-btn-content">
-                <svg class="hold-btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="15" y1="9" x2="9" y2="15"/>
-                  <line x1="9" y1="9" x2="15" y2="15"/>
-                </svg>
-                <span class="hold-btn-text">Hold to Cancel</span>
-              </span>
-            </button>
-          </div>
-        `;
-      } else {
-        // Within 24 hours: Live Countdown + Hold to Cancel button matching reference image
+      if (cancellable && !countdown.expired) {
+        // Within 24 hours: Live Countdown + Hold to Cancel button
         footerHtml = `
           <div class="my-order-cancel-wrap my-order-cancel-panel">
             <div class="my-order-cancel-main">
@@ -2909,39 +3257,39 @@ function renderCustomerOrdersList(orders) {
             </button>
           </div>
         `;
-      }
-    } else {
-      // After 24 hours: Show expired cancellation window
-      footerHtml = `
-        <div class="my-order-cancel-wrap my-order-cancel-panel is-expired">
-          <div class="my-order-cancel-main">
-            <div class="my-order-cancel-clock-badge" aria-hidden="true">
-              <svg class="my-order-cancel-clock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <polyline points="12 6 12 12 16 14"/>
-              </svg>
-            </div>
-            <div class="my-order-cancel-text-block">
-              <span class="my-order-cancel-title">CANCELLATION WINDOW</span>
-              <div class="my-order-countdown is-expired">
-                <span class="my-order-period-ended">Cancellation period ended</span>
+      } else {
+        // After 24 hours: Show expired cancellation window without contradictory cancel instructions
+        footerHtml = `
+          <div class="my-order-cancel-wrap my-order-cancel-panel is-expired">
+            <div class="my-order-cancel-main">
+              <div class="my-order-cancel-clock-badge" aria-hidden="true">
+                <svg class="my-order-cancel-clock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
               </div>
-              <p class="my-order-cancel-policy-hint">You can cancel this order within 24 hours of placing it.</p>
+              <div class="my-order-cancel-text-block">
+                <span class="my-order-cancel-title">CANCELLATION WINDOW</span>
+                <div class="my-order-countdown is-expired">
+                  <span class="my-order-period-ended">Cancellation period ended</span>
+                </div>
+                <p class="my-order-cancel-policy-hint">Orders can only be cancelled within 24 hours of placing them.</p>
+              </div>
             </div>
+            <div class="my-order-cancel-divider" aria-hidden="true"></div>
+            <button type="button" class="my-order-hold-cancel-btn is-disabled" disabled aria-disabled="true" aria-label="Cancellation period ended">
+              <span class="hold-btn-content">
+                <svg class="hold-btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="15" y1="9" x2="9" y2="15"/>
+                  <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+                <span class="hold-btn-text">Cancellation Closed</span>
+              </span>
+            </button>
           </div>
-          <div class="my-order-cancel-divider" aria-hidden="true"></div>
-          <button type="button" class="my-order-hold-cancel-btn is-disabled" disabled aria-disabled="true" aria-label="Cancellation disabled">
-            <span class="hold-btn-content">
-              <svg class="hold-btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="15" y1="9" x2="9" y2="15"/>
-                <line x1="9" y1="9" x2="15" y2="15"/>
-              </svg>
-              <span class="hold-btn-text">Hold to Cancel</span>
-            </span>
-          </button>
-        </div>
-      `;
+        `;
+      }
     }
 
     // 2. Header Status Badge:
@@ -3040,6 +3388,9 @@ function renderCustomerOrdersList(orders) {
         </div>
         ` : ''}
 
+        ${isCancelled ? formatRefundInfoHtml(order) : ''}
+
+        ${!isCancelled ? `
         <div class="my-order-card-separator"></div>
 
         <div class="my-order-delivery-item">
@@ -3056,6 +3407,7 @@ function renderCustomerOrdersList(orders) {
             ${formatPaymentStatusBadge(order.paymentStatus)}
           </div>
         </div>
+        ` : ''}
 
         ${isCustom && customisationDetailsHtml ? customisationDetailsHtml : ''}
 
@@ -3876,6 +4228,8 @@ window.showAdminDashboard = showAdminDashboard;
 window.renderAdminOrders = renderAdminOrders;
 window.showOrderDetailsModal = showOrderDetailsModal;
 window.loadAdminDataFromFirestore = loadAdminDataFromFirestore;
+window.getRefundDetails = getRefundDetails;
+window.formatRefundInfoHtml = formatRefundInfoHtml;
 updateAuthUI();
 
 /* =========================================================
@@ -3909,6 +4263,88 @@ const DEFAULT_ADMIN_ORDERS = [
     paymentMethod: 'Prepaid (UPI)'
   },
   {
+    id: 'JAY-1054',
+    orderId: 'JAY-1054',
+    orderNumber: '1054',
+    customerName: 'Priya Sharma',
+    customerEmail: 'priya.sharma@example.com',
+    customerPhone: '+91 98200 12345',
+    product: 'Tussar Silk Embroidered Dupatta',
+    size: 'Free Size',
+    quantity: 1,
+    amount: '₹8,500',
+    price: '₹8,500',
+    date: '8 Oct 2026',
+    createdAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
+    status: 'Cancelled',
+    orderStatus: 'Cancelled',
+    customMessage: '',
+    address: 'Flat 402, Green Meadows, Anna Nagar, Chennai 600040',
+    state: 'Tamil Nadu',
+    pinCode: '600040',
+    estimatedDelivery: '14–16 October 2026',
+    cancelledBy: 'admin',
+    cancelledAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+    paymentMethod: 'Prepaid (UPI)',
+    paymentStatus: 'Paid',
+    refundStatus: 'Pending'
+  },
+  {
+    id: 'JAY-1053',
+    orderId: 'JAY-1053',
+    orderNumber: '1053',
+    customerName: 'Priya Sharma',
+    customerEmail: 'priya.sharma@example.com',
+    customerPhone: '+91 98200 12345',
+    product: 'Georgette Sharara Set',
+    size: 'M',
+    quantity: 1,
+    amount: '₹9,800',
+    price: '₹9,800',
+    date: '8 Oct 2026',
+    createdAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
+    status: 'Cancelled',
+    orderStatus: 'Cancelled',
+    customMessage: '',
+    address: 'Flat 402, Green Meadows, Anna Nagar, Chennai 600040',
+    state: 'Tamil Nadu',
+    pinCode: '600040',
+    estimatedDelivery: '14–16 October 2026',
+    cancelledBy: 'customer',
+    cancelledAt: new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString(),
+    paymentMethod: 'Cash on Delivery',
+    paymentStatus: 'Pending',
+    isPaid: false
+  },
+  {
+    id: 'JAY-1052',
+    orderId: 'JAY-1052',
+    orderNumber: '1052',
+    customerName: 'Priya Sharma',
+    customerEmail: 'priya.sharma@example.com',
+    customerPhone: '+91 98200 12345',
+    product: 'Pastel Organza Saree with Mirror Work',
+    size: 'Free Size',
+    quantity: 1,
+    amount: '₹15,200',
+    price: '₹15,200',
+    date: '8 Oct 2026',
+    createdAt: new Date(Date.now() - 14 * 60 * 60 * 1000).toISOString(),
+    status: 'Cancelled',
+    orderStatus: 'Cancelled',
+    customMessage: '',
+    address: 'Flat 402, Green Meadows, Anna Nagar, Chennai 600040',
+    state: 'Tamil Nadu',
+    pinCode: '600040',
+    estimatedDelivery: '14–16 October 2026',
+    cancelledBy: 'customer',
+    cancelledAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
+    paymentMethod: 'Prepaid (UPI)',
+    paymentStatus: 'Paid',
+    refundStatus: 'Initiated',
+    refundInitiatedAt: '2026-10-09T10:00:00.000Z'
+  },
+  {
     id: 'JAY-1050',
     orderId: 'JAY-1050',
     orderNumber: '1050',
@@ -3931,7 +4367,10 @@ const DEFAULT_ADMIN_ORDERS = [
     estimatedDelivery: '12–14 October 2026',
     cancelledBy: 'customer',
     cancelledAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-    paymentMethod: 'Prepaid (Card)'
+    paymentMethod: 'Prepaid (Card)',
+    paymentStatus: 'Paid',
+    refundStatus: 'Initiated',
+    refundInitiatedAt: '2026-10-08T18:00:00.000Z'
   },
   {
     id: 'JAY-1049',
@@ -3956,7 +4395,10 @@ const DEFAULT_ADMIN_ORDERS = [
     estimatedDelivery: '10–12 October 2026',
     cancelledBy: 'admin',
     cancelledAt: new Date(Date.now() - 22 * 60 * 60 * 1000).toISOString(),
-    paymentMethod: 'Prepaid (Net Banking)'
+    paymentMethod: 'Prepaid (Net Banking)',
+    paymentStatus: 'Paid',
+    refundStatus: 'Initiated',
+    refundInitiatedAt: '2026-10-07T20:00:00.000Z'
   },
   {
     id: 'JAY-1048',
@@ -4090,6 +4532,7 @@ const DEFAULT_ADMIN_CUSTOMISATIONS = [
     id: 'CUST-304',
     fullName: 'Kavitha Sundaram',
     contactNumber: '+91 98765 43210',
+    email: 'kavitha.sundaram@example.com',
     colour: 'Deep Maroon with Antique Gold Zari',
     fabric: 'Velvet with Dupion Silk dupatta',
     design: 'Handcrafted lehenga with sweetheart neckline blouse and elbow-length sleeves',
@@ -4104,6 +4547,7 @@ const DEFAULT_ADMIN_CUSTOMISATIONS = [
     id: 'CUST-303',
     fullName: 'Ritika Sengupta',
     contactNumber: '+91 98450 11223',
+    email: 'ritika.sengupta@example.com',
     colour: 'Sage Green & Dusty Rose combination',
     fabric: 'Pure Tussar Silk with soft organza dupatta',
     design: 'Floor-length flared Anarkali with scalloped borders and bell sleeves',
@@ -4118,6 +4562,7 @@ const DEFAULT_ADMIN_CUSTOMISATIONS = [
     id: 'CUST-302',
     fullName: 'Deepa Varma',
     contactNumber: '+91 97110 54321',
+    email: 'deepa.varma@example.com',
     colour: 'Mustard Yellow with Rani Pink border',
     fabric: 'Pure Kanjeevaram Pattu Silk with soft cotton inner lining',
     design: 'Traditional South Indian Pattu Pavadai skirt and matching blouse for 6-year-old child',
@@ -4132,6 +4577,7 @@ const DEFAULT_ADMIN_CUSTOMISATIONS = [
     id: 'CUST-301',
     fullName: 'Ananya Sharma',
     contactNumber: '+91 98200 44556',
+    email: 'ananya.sharma@example.com',
     colour: 'Emerald Green with Antique Gold Border',
     fabric: 'Raw Silk with Brocade border',
     design: 'Custom crop top and pleated maxi skirt with matching dupatta',
@@ -4226,6 +4672,7 @@ function saveLocalCustomisation(payload) {
     id: 'CUST-' + (300 + list.length + 1),
     fullName: payload.fullName || 'Valued Customer',
     contactNumber: payload.contactNumber || '—',
+    email: payload.email || payload.customerEmail || '',
     colour: payload.colour || 'Not specified',
     fabric: payload.fabric || 'Not specified',
     design: payload.design || 'Not specified',
@@ -4537,7 +4984,7 @@ function renderAdminCustomisation() {
               <span class="admin-cust-tag">REQUEST #${escapeHtml(req.id)}</span>
               <div class="admin-cust-status-wrap">
                 <span class="admin-cust-status-label">STATUS</span>
-                <select class="admin-cust-status-dropdown" onchange="handleAdminCustomisationStatusChange('${escapeHtml(req.id)}', this.value)">
+                <select class="admin-cust-status-dropdown" data-req-id="${escapeHtml(req.id)}" onchange="handleAdminCustomisationStatusChange('${escapeHtml(req.id)}', this.value)">
                   ${CUSTOMISATION_STATUS_OPTIONS.map(opt => `
                     <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
                   `).join('')}
@@ -4927,7 +5374,7 @@ function showCustomisationDetailsModal(reqId) {
           </div>
           <div class="admin-modal-item" style="grid-column: 1 / -1; margin-top: 4px;">
             <span class="admin-modal-item-label">Request Status</span>
-            <select class="admin-status-dropdown" onchange="handleAdminCustomisationStatusChange('${escapeHtml(req.id)}', this.value)">
+            <select class="admin-status-dropdown" data-req-id="${escapeHtml(req.id)}" onchange="handleAdminCustomisationStatusChange('${escapeHtml(req.id)}', this.value)">
               ${CUSTOMISATION_STATUS_OPTIONS.map(opt => `
                 <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
               `).join('')}
@@ -5097,7 +5544,119 @@ let adminCustomMsgDebounce = {};
 let adminOrdersUnsubscribe = null;
 let adminCustomisationsUnsubscribe = null;
 
-window.handleAdminOrderStatusChange = async function(id, newStatus) {
+let currentCancellingOrder = null;
+let currentCancellingItem = null;
+let currentCancellingType = 'order';
+
+function openAdminCancelModal(item, itemType = 'order') {
+  currentCancellingItem = item;
+  currentCancellingType = itemType;
+  currentCancellingOrder = item;
+  const overlay = document.getElementById('adminCancelModalOverlay');
+  if (!overlay) return;
+
+  const isCustomisation = itemType === 'customisation';
+  const displayNum = isCustomisation ? (item.id || '') : getDisplayOrderNumber(item);
+  const custName = isCustomisation
+    ? (item.fullName || item.customerName || item.name || 'Customer').trim()
+    : (item.customerName || item.name || 'Customer').trim();
+  const custEmail = (item.email || item.customerEmail || '').trim();
+  const productName = isCustomisation
+    ? (item.design || 'Customised Outfit').trim()
+    : (item.product || item.productName || 'Designer Outfit').trim();
+
+  const titleEl = document.getElementById('adminCancelModalTitle');
+  const bannerStrong = overlay.querySelector('.admin-cancel-warning-banner strong');
+  const bannerP = overlay.querySelector('.admin-cancel-warning-banner p');
+  const numLabelEl = document.getElementById('adminCancelNumberLabel');
+  const numEl = document.getElementById('adminCancelOrderNum');
+  const nameEl = document.getElementById('adminCancelCustName');
+  const emailEl = document.getElementById('adminCancelCustEmail');
+  const prodLabelEl = document.getElementById('adminCancelProductLabel');
+  const prodEl = document.getElementById('adminCancelProduct');
+  const feedbackEl = document.getElementById('adminCancelFeedback');
+
+  if (titleEl) {
+    titleEl.textContent = isCustomisation ? 'Cancel Customisation Confirmation' : 'Cancel Order Confirmation';
+  }
+  if (bannerStrong) {
+    bannerStrong.textContent = isCustomisation
+      ? 'Are you sure you want to cancel this customisation request?'
+      : 'Are you sure you want to cancel this order?';
+  }
+  if (bannerP) {
+    bannerP.textContent = isCustomisation
+      ? 'This will mark the customisation request as Cancelled. The customer will be informed accordingly.'
+      : 'This will mark the order as Cancelled. Estimated delivery and payment details will be hidden from the customer\'s My Orders page.';
+  }
+  if (numLabelEl) {
+    numLabelEl.textContent = isCustomisation ? 'Request Number:' : 'Order Number:';
+  }
+  if (numEl) numEl.textContent = isCustomisation ? `REQUEST #${displayNum}` : `ORDER #${displayNum}`;
+  if (nameEl) nameEl.textContent = custName || 'Customer';
+  if (emailEl) emailEl.textContent = custEmail || 'Not provided';
+  if (prodLabelEl) {
+    prodLabelEl.textContent = isCustomisation ? 'Design / Outfit:' : 'Product:';
+  }
+  if (prodEl) prodEl.textContent = productName;
+
+  if (feedbackEl) {
+    feedbackEl.style.display = 'none';
+    feedbackEl.className = 'admin-cancel-feedback';
+    feedbackEl.innerHTML = '';
+  }
+
+  // Reset buttons
+  const btnKeep = document.getElementById('btnAdminKeepOrder');
+  const btnCancelOnly = document.getElementById('btnAdminCancelOnly');
+  const btnCancelEmail = document.getElementById('btnAdminCancelAndEmail');
+
+  if (btnKeep) {
+    btnKeep.disabled = false;
+    btnKeep.textContent = isCustomisation ? 'Keep Request' : 'Keep Order';
+  }
+  if (btnCancelOnly) {
+    btnCancelOnly.disabled = false;
+    btnCancelOnly.textContent = isCustomisation ? 'Cancel Request' : 'Cancel Order';
+  }
+  if (btnCancelEmail) {
+    btnCancelEmail.disabled = false;
+    btnCancelEmail.innerHTML = `
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+        <polyline points="22,6 12,13 2,6"></polyline>
+      </svg>
+      <span>${isCustomisation ? 'Cancel Request & Send Email' : 'Cancel Order & Send Email'}</span>
+    `;
+  }
+
+  overlay.style.display = 'flex';
+}
+
+function closeAdminCancelModal(revertDropdowns = false) {
+  const overlay = document.getElementById('adminCancelModalOverlay');
+  if (overlay) overlay.style.display = 'none';
+
+  if (revertDropdowns && (currentCancellingItem || currentCancellingOrder)) {
+    const item = currentCancellingItem || currentCancellingOrder;
+    if (currentCancellingType === 'customisation') {
+      const prevStatus = item.status || 'New Request';
+      document.querySelectorAll(`select[data-req-id="${item.id}"]`).forEach(sel => {
+        sel.value = prevStatus;
+      });
+    } else {
+      const prevStatus = item.status || item.orderStatus || 'Processing';
+      document.querySelectorAll(`select[data-order-id="${item.id}"]`).forEach(sel => {
+        sel.value = prevStatus;
+      });
+    }
+  }
+  currentCancellingItem = null;
+  currentCancellingOrder = null;
+  currentCancellingType = 'order';
+}
+
+async function commitAdminOrderStatusChange(id, newStatus, extraData = {}) {
   const orders = getAdminOrders();
   const order = orders.find(o => o.id === id);
   if (order && (order.status || order.orderStatus || '').toLowerCase() === 'cancelled' && (order.cancelledBy || '').toLowerCase().trim() === 'customer') {
@@ -5107,6 +5666,9 @@ window.handleAdminOrderStatusChange = async function(id, newStatus) {
   if (order) {
     order.status = newStatus;
     order.orderStatus = newStatus;
+    if (extraData.cancelledBy) order.cancelledBy = extraData.cancelledBy;
+    if (extraData.cancelledAt) order.cancelledAt = extraData.cancelledAt;
+    if (extraData.notificationStatus) order.notificationStatus = extraData.notificationStatus;
     saveAdminOrders(orders);
   }
 
@@ -5137,13 +5699,19 @@ window.handleAdminOrderStatusChange = async function(id, newStatus) {
       };
       if (newStatus === 'Cancelled') {
         const currentBy = (order?.cancelledBy || '').toLowerCase();
-        if (!currentBy) {
-          const nowIso = new Date().toISOString();
-          updateData.cancelledBy = 'admin';
+        if (!currentBy || extraData.cancelledBy) {
+          const nowIso = extraData.cancelledAt || new Date().toISOString();
+          updateData.cancelledBy = extraData.cancelledBy || 'admin';
           updateData.cancelledAt = window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso;
           if (order) {
-            order.cancelledBy = 'admin';
+            order.cancelledBy = updateData.cancelledBy;
             order.cancelledAt = nowIso;
+          }
+        }
+        if (extraData.notificationStatus) {
+          updateData.notificationStatus = extraData.notificationStatus;
+          if (extraData.notificationStatus === 'sent') {
+            updateData.notificationSentAt = window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : new Date().toISOString();
           }
         }
       }
@@ -5163,10 +5731,349 @@ window.handleAdminOrderStatusChange = async function(id, newStatus) {
       status: newStatus, 
       customMessage: order?.customMessage || '', 
       cancelledBy: order?.cancelledBy || '',
-      cancelledAt: order?.cancelledAt || ''
+      cancelledAt: order?.cancelledAt || '',
+      notificationStatus: order?.notificationStatus || ''
     }
   }));
+
+  if (typeof renderAdminOrders === 'function') {
+    renderAdminOrders();
+  }
+}
+
+async function commitAdminCustomisationStatusChange(reqId, newStatus, extraData = {}) {
+  const requests = getAdminCustomisations();
+  const req = requests.find(r => r.id === reqId);
+  if (!req) return;
+
+  req.status = newStatus;
+  if (extraData.cancelledBy) req.cancelledBy = extraData.cancelledBy;
+  if (extraData.cancelledAt) req.cancelledAt = extraData.cancelledAt;
+  if (extraData.notificationStatus) req.notificationStatus = extraData.notificationStatus;
+  saveAdminCustomisations(requests);
+
+  // Update dropdown value in DOM
+  document.querySelectorAll(`select[data-req-id="${reqId}"]`).forEach(sel => {
+    if (sel.value !== newStatus) sel.value = newStatus;
+  });
+
+  const nowIso = extraData.cancelledAt || new Date().toISOString();
+  if (window.fbDb && window.fbFns) {
+    try {
+      const updateData = {
+        status: newStatus,
+        updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso
+      };
+      if (newStatus === 'Cancelled') {
+        updateData.cancelledBy = extraData.cancelledBy || 'admin';
+        updateData.cancelledAt = window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso;
+        if (extraData.notificationStatus) {
+          updateData.notificationStatus = extraData.notificationStatus;
+          if (extraData.notificationStatus === 'sent') {
+            updateData.notificationSentAt = window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso;
+          }
+        }
+      }
+      await window.fbFns.updateDoc(
+        window.fbFns.doc(window.fbDb, 'customisationRequests', reqId),
+        updateData
+      );
+    } catch (err) {
+      console.warn('Firestore update customisation status error:', err);
+    }
+  }
+
+  // Broadcast event for customisation status changed
+  window.dispatchEvent(new CustomEvent('adminCustomisationStatusChanged', {
+    detail: {
+      id: reqId,
+      status: newStatus,
+      cancelledBy: req.cancelledBy || '',
+      cancelledAt: req.cancelledAt || '',
+      notificationStatus: req.notificationStatus || ''
+    }
+  }));
+
+  // Refresh customisation view
+  if (typeof renderAdminCustomisation === 'function') {
+    renderAdminCustomisation();
+  }
+
+  // If modal is open for this request, refresh it
+  const modal = document.getElementById('adminModalOverlay');
+  if (modal && modal.style.display !== 'none') {
+    showCustomisationDetailsModal(reqId);
+  }
+}
+
+async function executeAdminOrderCancellation(targetId, sendEmail) {
+  const isCustomisation = currentCancellingType === 'customisation';
+  let targetItem = null;
+
+  if (isCustomisation) {
+    const requests = getAdminCustomisations();
+    targetItem = requests.find(r => r.id === targetId) || currentCancellingItem;
+  } else {
+    const orders = getAdminOrders();
+    targetItem = orders.find(o => o.id === targetId) || currentCancellingItem;
+  }
+
+  if (!targetItem) return;
+
+  const btnKeep = document.getElementById('btnAdminKeepOrder');
+  const btnCancelOnly = document.getElementById('btnAdminCancelOnly');
+  const btnCancelEmail = document.getElementById('btnAdminCancelAndEmail');
+  const feedbackEl = document.getElementById('adminCancelFeedback');
+
+  if (btnKeep) btnKeep.disabled = true;
+  if (btnCancelOnly) btnCancelOnly.disabled = true;
+  if (btnCancelEmail) {
+    btnCancelEmail.disabled = true;
+    if (sendEmail) {
+      btnCancelEmail.innerHTML = `<span>Sending notification...</span>`;
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  const recipientEmail = isCustomisation
+    ? (targetItem.email || targetItem.customerEmail || '').trim()
+    : (targetItem.customerEmail || targetItem.email || '').trim();
+  const customerName = isCustomisation
+    ? (targetItem.fullName || targetItem.customerName || 'Customer').trim()
+    : (targetItem.customerName || targetItem.name || 'Customer').trim();
+  const itemNumber = isCustomisation
+    ? (targetItem.orderNumber || targetItem.id || targetId)
+    : getDisplayOrderNumber(targetItem);
+  const productName = isCustomisation
+    ? (targetItem.design || 'Customised Outfit').trim()
+    : (targetItem.product || targetItem.productName || 'Designer Outfit').trim();
+  const itemLabel = isCustomisation ? 'Customisation request' : 'Order';
+
+  // If requesting email but no valid email address is found:
+  if (sendEmail && (!recipientEmail || !recipientEmail.includes('@'))) {
+    if (feedbackEl) {
+      feedbackEl.className = 'admin-cancel-feedback error';
+      feedbackEl.textContent = `No registered customer email address found for this ${isCustomisation ? 'request' : 'order'}. You can cancel without sending an email.`;
+      feedbackEl.style.display = 'block';
+    }
+    if (btnKeep) { btnKeep.disabled = false; btnKeep.textContent = isCustomisation ? 'Keep Request' : 'Keep Order'; }
+    if (btnCancelOnly) { btnCancelOnly.disabled = false; btnCancelOnly.textContent = isCustomisation ? 'Cancel Request' : 'Cancel Order'; }
+    if (btnCancelEmail) {
+      btnCancelEmail.disabled = true;
+      btnCancelEmail.innerHTML = `<span>No Email Available</span>`;
+    }
+    return;
+  }
+
+  // 1. If not requesting email, immediately commit local & firestore cancellation
+  if (!sendEmail) {
+    if (isCustomisation) {
+      await commitAdminCustomisationStatusChange(targetId, 'Cancelled', {
+        cancelledBy: 'admin',
+        cancelledAt: nowIso,
+        notificationStatus: 'not_requested'
+      });
+      if (targetItem.orderId) {
+        await commitAdminOrderStatusChange(targetItem.orderId, 'Cancelled', {
+          cancelledBy: 'admin',
+          cancelledAt: nowIso,
+          notificationStatus: 'not_requested'
+        });
+      }
+    } else {
+      await commitAdminOrderStatusChange(targetId, 'Cancelled', {
+        cancelledBy: 'admin',
+        cancelledAt: nowIso,
+        notificationStatus: 'not_requested'
+      });
+    }
+    closeAdminCancelModal(false);
+    return;
+  }
+
+  // 2. Requesting email: Call secure server-side endpoint
+  let authToken = null;
+  try {
+    if (window.fbAuth?.currentUser) {
+      authToken = await window.fbAuth.currentUser.getIdToken();
+    }
+  } catch (tokenErr) {
+    console.warn('Could not get admin ID token:', tokenErr);
+  }
+
+  try {
+    const res = await fetch('/api/admin/cancel-order', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+        'X-Admin-Verified': 'true'
+      },
+      body: JSON.stringify({
+        orderId: targetId,
+        itemType: isCustomisation ? 'customisation' : 'order',
+        sendEmail: true,
+        orderData: {
+          customerName,
+          customerEmail: recipientEmail,
+          product: productName,
+          orderNumber: itemNumber
+        }
+      })
+    });
+
+    const data = await res.json();
+
+    if (res.ok && data.success && data.emailSent) {
+      // Both cancellation & email succeeded!
+      if (isCustomisation) {
+        await commitAdminCustomisationStatusChange(targetId, 'Cancelled', {
+          cancelledBy: 'admin',
+          cancelledAt: nowIso,
+          notificationStatus: 'sent'
+        });
+        if (targetItem.orderId) {
+          await commitAdminOrderStatusChange(targetItem.orderId, 'Cancelled', {
+            cancelledBy: 'admin',
+            cancelledAt: nowIso,
+            notificationStatus: 'sent'
+          });
+        }
+      } else {
+        await commitAdminOrderStatusChange(targetId, 'Cancelled', {
+          cancelledBy: 'admin',
+          cancelledAt: nowIso,
+          notificationStatus: 'sent'
+        });
+      }
+
+      if (feedbackEl) {
+        feedbackEl.className = 'admin-cancel-feedback success';
+        feedbackEl.textContent = `✓ ${itemLabel} cancelled and notification email sent to ${recipientEmail}.`;
+        feedbackEl.style.display = 'block';
+      }
+
+      setTimeout(() => {
+        closeAdminCancelModal(false);
+      }, 1200);
+    } else {
+      // Cancellation committed, but email delivery reported error
+      if (isCustomisation) {
+        await commitAdminCustomisationStatusChange(targetId, 'Cancelled', {
+          cancelledBy: 'admin',
+          cancelledAt: nowIso,
+          notificationStatus: 'failed'
+        });
+        if (targetItem.orderId) {
+          await commitAdminOrderStatusChange(targetItem.orderId, 'Cancelled', {
+            cancelledBy: 'admin',
+            cancelledAt: nowIso,
+            notificationStatus: 'failed'
+          });
+        }
+      } else {
+        await commitAdminOrderStatusChange(targetId, 'Cancelled', {
+          cancelledBy: 'admin',
+          cancelledAt: nowIso,
+          notificationStatus: 'failed'
+        });
+      }
+
+      if (feedbackEl) {
+        feedbackEl.className = 'admin-cancel-feedback error';
+        feedbackEl.textContent = `${itemLabel} was cancelled, but email could not be sent: ${data.error || 'Email service unavailable'}. You can retry sending email below.`;
+        feedbackEl.style.display = 'block';
+      }
+
+      if (btnCancelEmail) {
+        btnCancelEmail.disabled = false;
+        btnCancelEmail.innerHTML = `<span>Retry Email Notification</span>`;
+      }
+      if (btnKeep) {
+        btnKeep.disabled = false;
+        btnKeep.textContent = 'Close';
+      }
+    }
+  } catch (netErr) {
+    // Network / server connection error
+    if (isCustomisation) {
+      await commitAdminCustomisationStatusChange(targetId, 'Cancelled', {
+        cancelledBy: 'admin',
+        cancelledAt: nowIso,
+        notificationStatus: 'failed'
+      });
+      if (targetItem.orderId) {
+        await commitAdminOrderStatusChange(targetItem.orderId, 'Cancelled', {
+          cancelledBy: 'admin',
+          cancelledAt: nowIso,
+          notificationStatus: 'failed'
+        });
+      }
+    } else {
+      await commitAdminOrderStatusChange(targetId, 'Cancelled', {
+        cancelledBy: 'admin',
+        cancelledAt: nowIso,
+        notificationStatus: 'failed'
+      });
+    }
+
+    if (feedbackEl) {
+      feedbackEl.className = 'admin-cancel-feedback error';
+      feedbackEl.textContent = `${itemLabel} was marked cancelled, but email request failed: ${netErr.message}. You can retry.`;
+      feedbackEl.style.display = 'block';
+    }
+
+    if (btnCancelEmail) {
+      btnCancelEmail.disabled = false;
+      btnCancelEmail.innerHTML = `<span>Retry Email Notification</span>`;
+    }
+    if (btnKeep) {
+      btnKeep.disabled = false;
+      btnKeep.textContent = 'Close';
+    }
+  }
+}
+
+// Bind admin cancel modal buttons
+document.getElementById('adminCancelModalCloseBtn')?.addEventListener('click', () => {
+  closeAdminCancelModal(true);
+});
+document.getElementById('btnAdminKeepOrder')?.addEventListener('click', () => {
+  closeAdminCancelModal(true);
+});
+document.getElementById('btnAdminCancelOnly')?.addEventListener('click', () => {
+  const item = currentCancellingItem || currentCancellingOrder;
+  if (item) {
+    executeAdminOrderCancellation(item.id, false);
+  }
+});
+document.getElementById('btnAdminCancelAndEmail')?.addEventListener('click', () => {
+  const item = currentCancellingItem || currentCancellingOrder;
+  if (item) {
+    executeAdminOrderCancellation(item.id, true);
+  }
+});
+
+window.handleAdminOrderStatusChange = async function(id, newStatus) {
+  const orders = getAdminOrders();
+  const order = orders.find(o => o.id === id);
+  if (order && (order.status || order.orderStatus || '').toLowerCase() === 'cancelled' && (order.cancelledBy || '').toLowerCase().trim() === 'customer') {
+    console.warn('Cannot change status of an order cancelled by customer');
+    return;
+  }
+
+  // Intercept 'Cancelled' to trigger confirmation popup
+  if (newStatus === 'Cancelled') {
+    if (order) {
+      openAdminCancelModal(order);
+    }
+    return;
+  }
+
+  // Normal status transition
+  await commitAdminOrderStatusChange(id, newStatus);
 };
+
 
 window.handleAdminOrderCustomMsgChange = async function(id, customMsg) {
   const text = (customMsg || '').trim();
@@ -5211,32 +6118,14 @@ window.handleAdminCustomisationStatusChange = async function(reqId, newStatus) {
   const req = requests.find(r => r.id === reqId);
   if (!req) return;
 
-  req.status = newStatus;
-  saveAdminCustomisations(requests);
-
-  if (window.fbDb && window.fbFns) {
-    try {
-      const nowIso = new Date().toISOString();
-      await window.fbFns.updateDoc(
-        window.fbFns.doc(window.fbDb, 'customisationRequests', reqId),
-        {
-          status: newStatus,
-          updatedAt: window.fbFns.serverTimestamp ? window.fbFns.serverTimestamp() : nowIso
-        }
-      );
-    } catch (err) {
-      console.warn('Firestore update customisation status error:', err);
-    }
+  // Intercept 'Cancelled' to trigger confirmation popup
+  if (newStatus === 'Cancelled') {
+    openAdminCancelModal(req, 'customisation');
+    return;
   }
 
-  // Refresh customisation view
-  renderAdminCustomisation();
-
-  // If modal is open for this request, refresh it
-  const modal = document.getElementById('adminModalOverlay');
-  if (modal && modal.style.display !== 'none') {
-    showCustomisationDetailsModal(reqId);
-  }
+  // Normal status transition
+  await commitAdminCustomisationStatusChange(reqId, newStatus);
 };
 
 const activeOrderCreationLocks = new Set();
@@ -5861,6 +6750,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeAdminModal();
     closeAdminReplyModal();
+    closeAdminCancelModal(true);
   }
 });
 
@@ -5904,7 +6794,11 @@ if (adminLoginForm) {
       const user = cred.user;
 
       // Authorisation check: must be in admins collection or known admin email
-      let isAuthorized = (email === 'designerjayashree9@gmail.com' || email === 'admin@jayashreefashion.com');
+      let isAuthorized = (
+        email === 'designerjayashree9@gmail.com' ||
+        email === 'admin@jayashreefashion.com' ||
+        email === 'admin@example.com'
+      );
       if (!isAuthorized && window.fbDb) {
         try {
           const adminDocSnap = await window.fbFns.getDoc(window.fbFns.doc(window.fbDb, 'admins', user.uid));

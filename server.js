@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { handleChatMessage, verifyOrSelectModel } from './server/chatbotService.js';
+import { resolveRazorpayPaymentMethod } from './server/cancellationService.js';
 
 dotenv.config();
 
@@ -153,8 +154,8 @@ app.post('/api/payment/create-order', async (req, res) => {
   }
 });
 
-// Verify Payment Signature Endpoint with Timing-Safe HMAC Verification
-app.post('/api/payment/verify', (req, res) => {
+// Verify Payment Signature Endpoint with Timing-Safe HMAC Verification and Method Resolution
+app.post('/api/payment/verify', async (req, res) => {
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
   if (!keySecret) {
     return res.status(503).json({
@@ -182,16 +183,139 @@ app.post('/api/payment/verify', (req, res) => {
   const sigBuf = Buffer.from(String(razorpaySignature), 'utf8');
   const isMatch = expectedBuf.length === sigBuf.length && crypto.timingSafeEqual(expectedBuf, sigBuf);
 
-  if (isMatch) {
-    return res.json({ success: true, verified: true });
-  } else {
+  if (!isMatch) {
     return res.status(400).json({
       success: false,
       verified: false,
       error: 'Payment signature verification failed'
     });
   }
+
+  // Fetch actual payment details from Razorpay if credentials exist
+  let paymentDetails = null;
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  if (keyId && keySecret) {
+    try {
+      const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+      const pRes = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(razorpayPaymentId)}`, {
+        headers: { 'Authorization': authHeader }
+      });
+      if (pRes.ok) {
+        paymentDetails = await pRes.json();
+      }
+    } catch (pErr) {
+      console.warn('Could not fetch Razorpay payment details:', pErr.message);
+    }
+  }
+
+  // Resolve payment method using verified transaction details or trusted request parameters
+  const methodInput = paymentDetails || req.body.paymentDetails || req.body.paymentMethod || req.body.method;
+  const resolved = resolveRazorpayPaymentMethod(methodInput);
+
+  return res.json({
+    success: true,
+    verified: true,
+    paymentMethod: resolved.label,
+    methodCategory: resolved.category,
+    rawMethod: paymentDetails?.method || req.body.method || (resolved.isIdentified ? resolved.category : null),
+    refundTimeframe: resolved.timeline,
+    refundMessage: resolved.refundMessage,
+    isIdentified: resolved.isIdentified,
+    payment: paymentDetails ? {
+      id: paymentDetails.id,
+      method: paymentDetails.method,
+      card: paymentDetails.card,
+      bank: paymentDetails.bank,
+      wallet: paymentDetails.wallet,
+      vpa: paymentDetails.vpa
+    } : null
+  });
 });
+
+// Admin Order Cancellation with Gmail API Notification Endpoint
+app.post('/api/admin/cancel-order', async (req, res) => {
+  const { default: handler } = await import('./api/admin/cancel-order.js');
+  return handler(req, res);
+});
+
+// Order Cancellation Eligibility & Refund Information Endpoint
+app.post('/api/orders/eligibility', async (req, res) => {
+  const { default: handler } = await import('./api/orders/eligibility.js');
+  return handler(req, res);
+});
+
+// Order Confirmation Email Notification Endpoint
+app.post('/api/orders/confirmation-email', async (req, res) => {
+  const { default: handler } = await import('./api/orders/confirmation-email.js');
+  return handler(req, res);
+});
+
+// OAuth2 Callback Handler for 1-Click Authorisation
+app.get('/oauth2callback', async (req, res) => {
+  const code = req.query.code;
+  const error = req.query.error;
+
+  if (error) {
+    return res.status(400).send(`<h3>❌ Google Authorisation Error</h3><p>${error}</p>`);
+  }
+  if (!code) {
+    return res.status(400).send('Missing authorization code');
+  }
+
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+  const redirectUri = `${req.protocol}://${req.get('host')}/oauth2callback`;
+
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code: String(code),
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      }).toString()
+    });
+
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.refresh_token) {
+      throw new Error(tokenData.error_description || tokenData.error || 'No refresh token returned');
+    }
+
+    const targetPaths = Array.from(new Set(['/Users/apple/Desktop/key/.env', path.join(__dirname, '.env')]));
+    for (const envFilePath of targetPaths) {
+      if (fs.existsSync(path.dirname(envFilePath))) {
+        let envContent = fs.existsSync(envFilePath) ? fs.readFileSync(envFilePath, 'utf8') : '';
+        if (/GMAIL_REFRESH_TOKEN\s*=/i.test(envContent)) {
+          envContent = envContent.replace(/GMAIL_REFRESH_TOKEN\s*=.*$/m, `GMAIL_REFRESH_TOKEN=${tokenData.refresh_token}`);
+        } else {
+          envContent += `\nGMAIL_REFRESH_TOKEN=${tokenData.refresh_token}`;
+        }
+        if (!/GMAIL_SENDER_EMAIL\s*=/i.test(envContent)) {
+          envContent += `\nGMAIL_SENDER_EMAIL=designerjayashree9@gmail.com`;
+        }
+        fs.writeFileSync(envFilePath, envContent.trim() + '\n', 'utf8');
+      }
+    }
+    process.env.GMAIL_REFRESH_TOKEN = tokenData.refresh_token;
+
+    return res.send(`
+      <div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;padding:60px;text-align:center;max-width:500px;margin:40px auto;border:1px solid #e5d9c5;border-radius:16px;background:#FAF7F2;color:#4A382A;">
+        <div style="font-size:48px;margin-bottom:16px;">✨</div>
+        <h2 style="margin:0 0 10px;color:#4A382A;">Gmail Authorisation Successful!</h2>
+        <p style="color:#6B5D52;font-size:15px;line-height:1.5;">Your refresh token has been securely saved to your local <code>.env</code> file. The Jayashree website is now configured to send cancellation emails from <strong>designerjayashree9@gmail.com</strong>.</p>
+        <div style="margin-top:24px;padding:12px;background:#EEF8F1;border:1px solid #BBF7D0;border-radius:8px;color:#15803D;font-weight:600;font-size:13px;">
+          ✓ Safe to close this tab
+        </div>
+      </div>
+    `);
+  } catch (err) {
+    return res.status(500).send(`<h3>❌ Token Exchange Failed</h3><p>${err.message}</p>`);
+  }
+});
+
 
 // Serve static production build files if dist/ exists
 const distPath = path.resolve(__dirname, 'dist');
