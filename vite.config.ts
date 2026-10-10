@@ -459,6 +459,33 @@ function adminOrderApiPlugin(): Plugin {
           return;
         }
 
+        if (req.url === '/api/admin/email-queue' && req.method === 'GET') {
+          try {
+            const { getQueueData } = await import('./server/emailQueueService.js');
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: true, ...getQueueData() }));
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, error: err.message || 'Server error' }));
+          }
+          return;
+        }
+
+        if (req.url === '/api/admin/email-queue/process' && req.method === 'POST') {
+          try {
+            const { processQueue } = await import('./server/emailQueueService.js');
+            const result = await processQueue();
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: true, result }));
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, error: err.message || 'Server error' }));
+          }
+          return;
+        }
+
         next();
       });
     }

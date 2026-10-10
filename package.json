@@ -10,6 +10,7 @@
     "auth:gmail": "node scripts/auth-gmail.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
+    "test": "node test-cancellation-flow.mjs",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

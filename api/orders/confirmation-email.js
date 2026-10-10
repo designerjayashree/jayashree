@@ -1,4 +1,5 @@
 import { sendOrderConfirmationEmail, isGmailConfigured } from '../../server/emailService.js';
+import { enqueueEmail } from '../../server/emailQueueService.js';
 
 export default async function handler(req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -38,14 +39,6 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!isGmailConfigured()) {
-      return res.status(503).json({
-        success: false,
-        emailSent: false,
-        error: 'Gmail API is not fully authorised on the server. Please check .env credentials.'
-      });
-    }
-
     const customerName = (body.customerName || body.name || 'Valued Customer').trim();
     const productName = (body.product || body.productName || 'Designer Outfit').trim();
     const size = (body.size || 'Standard').trim();
@@ -53,6 +46,28 @@ export default async function handler(req, res) {
     const paymentMethod = (body.paymentMethod || 'Online Payment (Razorpay)').trim();
     const deliveryAddress = (body.deliveryAddress || body.address || 'Registered Delivery Address').trim();
     const estimatedDelivery = (body.estimatedDelivery || '4–7 Business Days').trim();
+
+    if (!isGmailConfigured()) {
+      const queuedItem = enqueueEmail({
+        type: 'confirmation',
+        orderId: body.orderId || orderNumber,
+        orderNumber,
+        customerEmail: recipientEmail,
+        customerName,
+        productName,
+        payload: { size, amount, paymentMethod, deliveryAddress, estimatedDelivery },
+        lastError: 'Gmail API not configured yet'
+      });
+      return res.status(200).json({
+        success: true,
+        emailSent: false,
+        queued: true,
+        queueId: queuedItem.id,
+        orderNumber,
+        recipient: recipientEmail,
+        message: `Order #${orderNumber} confirmed. Confirmation email queued for automatic delivery once Gmail is ready.`
+      });
+    }
 
     try {
       const sendRes = await sendOrderConfirmationEmail({
@@ -76,11 +91,26 @@ export default async function handler(req, res) {
         message: `Order #${orderNumber} confirmation email sent to ${recipientEmail}`
       });
     } catch (sendErr) {
-      console.error('Order confirmation email sending error:', sendErr.message);
-      return res.status(502).json({
-        success: false,
+      console.warn(`[ConfirmationEmail] Immediate delivery failed, queuing for automatic background retry: ${sendErr.message}`);
+      const queuedItem = enqueueEmail({
+        type: 'confirmation',
+        orderId: body.orderId || orderNumber,
+        orderNumber,
+        customerEmail: recipientEmail,
+        customerName,
+        productName,
+        payload: { size, amount, paymentMethod, deliveryAddress, estimatedDelivery },
+        lastError: sendErr.message
+      });
+
+      return res.status(200).json({
+        success: true,
         emailSent: false,
-        error: `Order confirmed, but email delivery failed: ${sendErr.message}`
+        queued: true,
+        queueId: queuedItem.id,
+        orderNumber,
+        recipient: recipientEmail,
+        message: `Order #${orderNumber} confirmed. Confirmation email queued for automatic delivery in the background.`
       });
     }
   } catch (err) {

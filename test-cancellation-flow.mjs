@@ -36,7 +36,8 @@ async function itAsync(desc, fn) {
 // -----------------------------------------------------------------------------
 console.log('▶️ TEST SUITE 1: Customer My Orders Display Rules');
 
-const scriptContent = fs.readFileSync('/Users/apple/Desktop/key/js/script.js', 'utf8');
+const ROOT_DIR = process.cwd();
+const scriptContent = fs.readFileSync(path.resolve(ROOT_DIR, 'js/script.js'), 'utf8');
 
 it('Hides estimated delivery item when isCancelled is true', () => {
   assert(
@@ -71,7 +72,7 @@ it('Renders cancellation status clearly for admin and customer cancellations', (
 // -----------------------------------------------------------------------------
 console.log('\n▶️ TEST SUITE 2: Admin Cancellation Confirmation Popup');
 
-const htmlContent = fs.readFileSync('/Users/apple/Desktop/key/index.html', 'utf8');
+const htmlContent = fs.readFileSync(path.resolve(ROOT_DIR, 'index.html'), 'utf8');
 
 it('Index.html contains admin cancel modal overlay with all required elements', () => {
   assert(htmlContent.includes('id="adminCancelModalOverlay"'), 'Modal overlay exists');
@@ -119,7 +120,7 @@ it('Validates recipient email before calling Gmail API', async () => {
 });
 
 it('Template matches required wording and sender', () => {
-  const emailServiceContent = fs.readFileSync('/Users/apple/Desktop/key/server/emailService.js', 'utf8');
+  const emailServiceContent = fs.readFileSync(path.resolve(ROOT_DIR, 'server/emailService.js'), 'utf8');
   assert(emailServiceContent.includes('Your Jayashree Order #${cleanOrderNum} Has Been Cancelled'), 'Subject matches specification');
   assert(emailServiceContent.includes('Dear ${cleanCustomerName},'), 'Salutation matches specification');
   assert(emailServiceContent.includes('We regret to inform you that your order #${cleanOrderNum} for ${cleanProduct} has been cancelled by Jayashree.'), 'Body text matches specification');
@@ -523,20 +524,20 @@ it('Client-side script.js implements resolveRazorpayPaymentMethod and handles re
 console.log('\n▶️ TEST SUITE 8: Customisation Order Cancellation & Email Notification');
 
 it('Intercepts status change to "Cancelled" in admin customisation requests', () => {
-  const freshScript = fs.readFileSync('/Users/apple/Desktop/key/js/script.js', 'utf8');
+  const freshScript = fs.readFileSync(path.resolve(ROOT_DIR, 'js/script.js'), 'utf8');
   assert(freshScript.includes("openAdminCancelModal(req, 'customisation')"), 'Customisation status change triggers cancellation modal with customisation context');
   assert(freshScript.includes('data-req-id='), 'Customisation status dropdowns include data-req-id for robust tracking');
 });
 
 it('Customisation cancellation email template matches required wording and subject', () => {
-  const emailServiceContent = fs.readFileSync('/Users/apple/Desktop/key/server/emailService.js', 'utf8');
+  const emailServiceContent = fs.readFileSync(path.resolve(ROOT_DIR, 'server/emailService.js'), 'utf8');
   assert(emailServiceContent.includes('Your Jayashree Customisation Request #${cleanOrderNum} Has Been Cancelled'), 'Subject matches customisation specification');
   assert(emailServiceContent.includes('We regret to inform you that your customisation request #${cleanOrderNum} for ${cleanProduct} has been cancelled by Jayashree.'), 'Body text matches customisation specification');
   assert(emailServiceContent.includes('itemType = \'order\''), 'sendCancellationEmail supports itemType parameter');
 });
 
 it('Customisation cancellation commits status change and dispatches adminCustomisationStatusChanged event', () => {
-  const freshScript = fs.readFileSync('/Users/apple/Desktop/key/js/script.js', 'utf8');
+  const freshScript = fs.readFileSync(path.resolve(ROOT_DIR, 'js/script.js'), 'utf8');
   assert(freshScript.includes('commitAdminCustomisationStatusChange'), 'Defines commitAdminCustomisationStatusChange');
   assert(freshScript.includes('adminCustomisationStatusChanged'), 'Dispatches adminCustomisationStatusChanged event');
 });
@@ -609,7 +610,7 @@ import confirmationEmailHandler from './api/orders/confirmation-email.js';
 import { sendOrderConfirmationEmail } from './server/emailService.js';
 
 it('sendOrderConfirmationEmail template matches required wording, structure, and sender', () => {
-  const emailServiceContent = fs.readFileSync('/Users/apple/Desktop/key/server/emailService.js', 'utf8');
+  const emailServiceContent = fs.readFileSync(path.resolve(ROOT_DIR, 'server/emailService.js'), 'utf8');
   assert(emailServiceContent.includes('Your Jayashree Order #${cleanOrderNum} Has Been Confirmed!'), 'Subject matches order confirmation specification');
   assert(emailServiceContent.includes('Thank you for your purchase with Jayashree!'), 'Body greeting matches specification');
   assert(emailServiceContent.includes('designerjayashree9@gmail.com'), 'Sender matches designerjayashree9@gmail.com');
@@ -685,9 +686,134 @@ itAsync('API rejects order confirmation email when order number is missing', asy
 });
 
 it('Client-side script.js dispatches /api/orders/confirmation-email on Razorpay payment completion', () => {
-  const freshScript = fs.readFileSync('/Users/apple/Desktop/key/js/script.js', 'utf8');
+  const freshScript = fs.readFileSync(path.resolve(ROOT_DIR, 'js/script.js'), 'utf8');
   assert(freshScript.includes('/api/orders/confirmation-email'), 'Must call /api/orders/confirmation-email in script.js');
   assert(freshScript.includes("paymentStatus === 'Paid' || razorpayData"), 'Must trigger on verified paid / Razorpay order');
+});
+
+// -----------------------------------------------------------------------------
+// TEST SUITE 10: Automatic Background Email Retry Queue System
+// -----------------------------------------------------------------------------
+console.log('\n▶️ TEST SUITE 10: Automatic Background Email Retry Queue System');
+
+import { enqueueEmail, getQueueData, processQueue } from './server/emailQueueService.js';
+
+it('enqueueEmail enqueues cancellation and order confirmation notifications persistently', () => {
+  const queued = enqueueEmail({
+    type: 'cancellation',
+    orderId: 'TEST-Q-101',
+    orderNumber: '101',
+    customerEmail: 'customer101@example.com',
+    customerName: 'Priya',
+    productName: 'Silk Anarkali',
+    lastError: 'Daily limit exceeded (500 mails/day)'
+  });
+
+  assert(queued.id && queued.id.startsWith('email_q_'), 'Expected valid queue ID');
+  assert.strictEqual(queued.type, 'cancellation');
+  assert.strictEqual(queued.orderId, 'TEST-Q-101');
+  assert.strictEqual(queued.status, 'pending');
+
+  const data = getQueueData();
+  const found = data.queue.find(item => item.id === queued.id);
+  assert(found, 'Item must be stored in persistent email queue');
+  assert.strictEqual(found.customerEmail, 'customer101@example.com');
+});
+
+it('Deduplicates duplicate enqueue requests for the same order and email type', () => {
+  const q1 = enqueueEmail({
+    type: 'cancellation',
+    orderId: 'TEST-DEDUP-200',
+    orderNumber: '200',
+    customerEmail: 'dedup@example.com',
+    lastError: 'Rate limit error 1'
+  });
+
+  const q2 = enqueueEmail({
+    type: 'cancellation',
+    orderId: 'TEST-DEDUP-200',
+    orderNumber: '200',
+    customerEmail: 'dedup@example.com',
+    lastError: 'Rate limit error 2'
+  });
+
+  assert.strictEqual(q1.id, q2.id, 'Deduplication should reuse existing pending queue item');
+  assert.strictEqual(q2.lastError, 'Rate limit error 2', 'Updates latest error message');
+});
+
+itAsync('cancel-order endpoint automatically queues email on failure and returns queued: true without requiring manual resend', async () => {
+  let statusCode = 0;
+  let responseData = null;
+  const mockReq = {
+    method: 'POST',
+    headers: { 'x-admin-verified': 'true' },
+    body: {
+      orderId: 'JAY-QUEUE-999',
+      sendEmail: true,
+      orderData: {
+        orderNumber: '999',
+        customerName: 'Test Customer',
+        customerEmail: 'test.quota@example.com',
+        product: 'Banarasi Brocade Suit'
+      }
+    }
+  };
+  const mockRes = {
+    setHeader: () => {},
+    status: (code) => { statusCode = code; return mockRes; },
+    json: (payload) => { responseData = payload; }
+  };
+
+  await cancelOrderHandler(mockReq, mockRes);
+  assert.strictEqual(statusCode, 200, 'Expected HTTP 200 with queue confirmation');
+  assert.strictEqual(responseData.cancelled, true, 'Order is cancelled');
+  assert.strictEqual(responseData.queued, true, 'Email is queued for automatic background retry');
+  assert(responseData.queueId, 'Returns queue ID tracking item');
+
+  const queueData = getQueueData();
+  const inQueue = queueData.queue.find(item => item.id === responseData.queueId);
+  assert(inQueue, 'Item exists in email queue');
+  assert.strictEqual(inQueue.customerEmail, 'test.quota@example.com');
+});
+
+itAsync('confirmation-email endpoint automatically queues email on failure and returns queued: true', async () => {
+  let statusCode = 0;
+  let responseData = null;
+  const mockReq = {
+    method: 'POST',
+    headers: {},
+    body: {
+      orderId: 'JAY-CONF-888',
+      orderNumber: '888',
+      customerName: 'Aarti',
+      customerEmail: 'aarti.confirm@example.com',
+      product: 'Georgette Kurti'
+    }
+  };
+  const mockRes = {
+    setHeader: () => {},
+    status: (code) => { statusCode = code; return mockRes; },
+    json: (payload) => { responseData = payload; }
+  };
+
+  await confirmationEmailHandler(mockReq, mockRes);
+  assert.strictEqual(statusCode, 200, 'Expected HTTP 200 with queue confirmation');
+  assert.strictEqual(responseData.queued, true, 'Email is queued for automatic background retry');
+  assert(responseData.queueId, 'Returns queue ID');
+});
+
+it('Client-side script.js removes Retry Email Notification button and uses automatic background queuing', () => {
+  const freshScript = fs.readFileSync(path.resolve(ROOT_DIR, 'js/script.js'), 'utf8');
+  assert(!freshScript.includes('Retry Email Notification'), 'Retry Email Notification button should be removed from script.js');
+  assert(freshScript.includes("const notifStatus = 'queued'"), 'Sets notificationStatus to queued');
+  assert(freshScript.includes('syncQueuedEmailNotifications'), 'Includes automatic queue synchronization');
+});
+
+it('Admin tables render automatic email status badges without manual retry button', () => {
+  const freshScript = fs.readFileSync(path.resolve(ROOT_DIR, 'js/script.js'), 'utf8');
+  assert(freshScript.includes('admin-email-badge queued'), 'Orders table renders queued email badge');
+  assert(freshScript.includes('admin-cust-email-badge queued'), 'Customisation cards render queued email badge');
+  assert(!freshScript.includes('Retry Email Notification'), 'No manual retry email buttons in admin tables');
 });
 
 // Summary

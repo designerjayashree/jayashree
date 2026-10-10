@@ -1,4 +1,5 @@
 import { sendCancellationEmail, isGmailConfigured } from '../../server/emailService.js';
+import { enqueueEmail } from '../../server/emailQueueService.js';
 
 export default async function handler(req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -93,11 +94,26 @@ export default async function handler(req, res) {
       }
 
       if (!isGmailConfigured()) {
-        return res.status(503).json({
-          success: false,
+        const queuedItem = enqueueEmail({
+          type: 'cancellation',
+          orderId,
+          orderNumber,
+          customerEmail: recipientEmail,
+          customerName,
+          productName,
+          itemType,
+          lastError: 'Gmail API credentials not fully authorised yet'
+        });
+        return res.status(200).json({
+          success: true,
           cancelled: true,
           emailSent: false,
-          error: 'Gmail API is not fully authorised on the server. Please complete authorisation in .env'
+          queued: true,
+          queueId: queuedItem.id,
+          orderId,
+          orderNumber,
+          itemType,
+          message: `${itemLabel} #${orderNumber} cancelled. Email notification queued for automatic delivery once Gmail is ready.`
         });
       }
 
@@ -111,12 +127,27 @@ export default async function handler(req, res) {
         });
         emailResult = { sent: true, messageId: sendRes.messageId };
       } catch (sendErr) {
-        console.error('Cancellation email delivery failed:', sendErr.message);
-        return res.status(502).json({
-          success: false,
+        console.warn(`[CancelOrder] Email delivery failed, queuing for automatic background retry: ${sendErr.message}`);
+        const queuedItem = enqueueEmail({
+          type: 'cancellation',
+          orderId,
+          orderNumber,
+          customerEmail: recipientEmail,
+          customerName,
+          productName,
+          itemType,
+          lastError: sendErr.message
+        });
+        return res.status(200).json({
+          success: true,
           cancelled: true,
           emailSent: false,
-          error: `${itemLabel} cancelled, but email delivery failed: ${sendErr.message}`
+          queued: true,
+          queueId: queuedItem.id,
+          orderId,
+          orderNumber,
+          itemType,
+          message: `${itemLabel} #${orderNumber} cancelled. Email notification queued for automatic delivery in the background.`
         });
       }
     }

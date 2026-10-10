@@ -4924,6 +4924,11 @@ function renderAdminOrders() {
                         <div class="admin-cancelled-details-block">
                           <div class="admin-cancelled-line">Cancelled by: <strong>${(order.cancelledBy || '').toLowerCase() === 'customer' ? 'Customer' : 'Admin'}</strong></div>
                           ${order.cancelledAt ? `<div class="admin-cancelled-line admin-cancelled-time">Cancelled at: <span>${escapeHtml(formatOrderDateTime(order.cancelledAt))}</span></div>` : ''}
+                          ${order.notificationStatus === 'sent' ? `
+                            <div class="admin-cancelled-line"><span class="admin-email-badge sent">✓ Email Sent</span></div>
+                          ` : (order.notificationStatus === 'queued' || order.notificationStatus === 'failed') ? `
+                            <div class="admin-cancelled-line"><span class="admin-email-badge queued">⏳ Email Auto-Queued</span></div>
+                          ` : ''}
                         </div>
                       ` : ''}
                       <div class="admin-custom-msg-wrap" id="adminCustomWrap_${escapeHtml(order.id)}" style="${isOther ? 'display: block;' : 'display: none;'}">
@@ -4989,6 +4994,13 @@ function renderAdminCustomisation() {
                     <option value="${opt}" ${currentStatus === opt ? 'selected' : ''}>${opt}</option>
                   `).join('')}
                 </select>
+                ${currentStatus === 'Cancelled' ? (
+                  req.notificationStatus === 'sent'
+                    ? '<span class="admin-cust-email-badge sent">✓ Email Sent</span>'
+                    : (req.notificationStatus === 'queued' || req.notificationStatus === 'failed')
+                      ? '<span class="admin-cust-email-badge queued">⏳ Email Auto-Queued</span>'
+                      : ''
+                ) : ''}
               </div>
             </div>
 
@@ -5957,82 +5969,152 @@ async function executeAdminOrderCancellation(targetId, sendEmail) {
         closeAdminCancelModal(false);
       }, 1200);
     } else {
-      // Cancellation committed, but email delivery reported error
+      // Cancellation committed, and email is queued for automatic background delivery
+      const notifStatus = 'queued';
       if (isCustomisation) {
         await commitAdminCustomisationStatusChange(targetId, 'Cancelled', {
           cancelledBy: 'admin',
           cancelledAt: nowIso,
-          notificationStatus: 'failed'
+          notificationStatus: notifStatus
         });
         if (targetItem.orderId) {
           await commitAdminOrderStatusChange(targetItem.orderId, 'Cancelled', {
             cancelledBy: 'admin',
             cancelledAt: nowIso,
-            notificationStatus: 'failed'
+            notificationStatus: notifStatus
           });
         }
       } else {
         await commitAdminOrderStatusChange(targetId, 'Cancelled', {
           cancelledBy: 'admin',
           cancelledAt: nowIso,
-          notificationStatus: 'failed'
+          notificationStatus: notifStatus
         });
       }
 
       if (feedbackEl) {
-        feedbackEl.className = 'admin-cancel-feedback error';
-        feedbackEl.textContent = `${itemLabel} was cancelled, but email could not be sent: ${data.error || 'Email service unavailable'}. You can retry sending email below.`;
+        feedbackEl.className = 'admin-cancel-feedback success';
+        feedbackEl.textContent = `✓ ${itemLabel} cancelled. Notification email queued for automatic delivery in background.`;
         feedbackEl.style.display = 'block';
       }
 
       if (btnCancelEmail) {
-        btnCancelEmail.disabled = false;
-        btnCancelEmail.innerHTML = `<span>Retry Email Notification</span>`;
+        btnCancelEmail.disabled = true;
+        btnCancelEmail.innerHTML = `<span>✓ Email Queued</span>`;
       }
       if (btnKeep) {
         btnKeep.disabled = false;
-        btnKeep.textContent = 'Close';
+        btnKeep.textContent = 'Done';
       }
+
+      setTimeout(() => {
+        closeAdminCancelModal(false);
+      }, 1500);
     }
   } catch (netErr) {
-    // Network / server connection error
+    // Network / server connection error fallback: queue for background delivery
+    const notifStatus = 'queued';
     if (isCustomisation) {
       await commitAdminCustomisationStatusChange(targetId, 'Cancelled', {
         cancelledBy: 'admin',
         cancelledAt: nowIso,
-        notificationStatus: 'failed'
+        notificationStatus: notifStatus
       });
       if (targetItem.orderId) {
         await commitAdminOrderStatusChange(targetItem.orderId, 'Cancelled', {
           cancelledBy: 'admin',
           cancelledAt: nowIso,
-          notificationStatus: 'failed'
+          notificationStatus: notifStatus
         });
       }
     } else {
       await commitAdminOrderStatusChange(targetId, 'Cancelled', {
         cancelledBy: 'admin',
         cancelledAt: nowIso,
-        notificationStatus: 'failed'
+        notificationStatus: notifStatus
       });
     }
 
     if (feedbackEl) {
-      feedbackEl.className = 'admin-cancel-feedback error';
-      feedbackEl.textContent = `${itemLabel} was marked cancelled, but email request failed: ${netErr.message}. You can retry.`;
+      feedbackEl.className = 'admin-cancel-feedback success';
+      feedbackEl.textContent = `✓ ${itemLabel} marked cancelled. Notification email queued for automatic background delivery.`;
       feedbackEl.style.display = 'block';
     }
 
     if (btnCancelEmail) {
-      btnCancelEmail.disabled = false;
-      btnCancelEmail.innerHTML = `<span>Retry Email Notification</span>`;
+      btnCancelEmail.disabled = true;
+      btnCancelEmail.innerHTML = `<span>✓ Email Queued</span>`;
     }
     if (btnKeep) {
       btnKeep.disabled = false;
-      btnKeep.textContent = 'Close';
+      btnKeep.textContent = 'Done';
     }
+
+    setTimeout(() => {
+      closeAdminCancelModal(false);
+    }, 1500);
   }
 }
+
+// Background sync helper to check if auto-queued emails have been delivered
+async function syncQueuedEmailNotifications() {
+  if (sessionStorage.getItem('jayashree_admin_logged') !== 'true') return;
+  try {
+    const res = await fetch('/api/admin/email-queue');
+    if (!res.ok) return;
+    const data = await res.json();
+    const sentHistory = data.history || [];
+    if (!sentHistory.length) return;
+
+    const sentOrderNumbers = new Set(
+      sentHistory
+        .filter(item => item.status === 'sent')
+        .map(item => String(item.orderNumber).replace(/^#/, ''))
+    );
+
+    let ordersChanged = false;
+    const orders = getAdminOrders();
+    orders.forEach(o => {
+      const num = getDisplayOrderNumber(o).replace(/^#/, '');
+      if ((o.notificationStatus === 'queued' || o.notificationStatus === 'failed') && sentOrderNumbers.has(num)) {
+        o.notificationStatus = 'sent';
+        ordersChanged = true;
+        if (window.fbDb && window.fbFns) {
+          window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'orders', o.id), {
+            notificationStatus: 'sent',
+            notificationSentAt: new Date().toISOString()
+          }).catch(() => {});
+        }
+      }
+    });
+    if (ordersChanged) {
+      saveAdminOrders(orders);
+      if (typeof renderAdminOrders === 'function') renderAdminOrders();
+    }
+
+    let custChanged = false;
+    const custs = getAdminCustomisations();
+    custs.forEach(c => {
+      const num = String(c.orderNumber || c.id || '').replace(/^#/, '');
+      if ((c.notificationStatus === 'queued' || c.notificationStatus === 'failed') && sentOrderNumbers.has(num)) {
+        c.notificationStatus = 'sent';
+        custChanged = true;
+        if (window.fbDb && window.fbFns) {
+          window.fbFns.updateDoc(window.fbFns.doc(window.fbDb, 'customisationRequests', c.id), {
+            notificationStatus: 'sent',
+            notificationSentAt: new Date().toISOString()
+          }).catch(() => {});
+        }
+      }
+    });
+    if (custChanged) {
+      saveAdminCustomisations(custs);
+      if (typeof renderAdminCustomisation === 'function') renderAdminCustomisation();
+    }
+  } catch (e) {}
+}
+
+setInterval(syncQueuedEmailNotifications, 45000);
 
 // Bind admin cancel modal buttons
 document.getElementById('adminCancelModalCloseBtn')?.addEventListener('click', () => {

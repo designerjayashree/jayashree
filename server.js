@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { handleChatMessage, verifyOrSelectModel } from './server/chatbotService.js';
 import { resolveRazorpayPaymentMethod } from './server/cancellationService.js';
+import { startQueueWorker, getQueueData, processQueue } from './server/emailQueueService.js';
 
 dotenv.config();
 
@@ -250,6 +251,16 @@ app.post('/api/orders/confirmation-email', async (req, res) => {
   return handler(req, res);
 });
 
+// Automatic Email Retry Queue Status & Manual Trigger Endpoints
+app.get('/api/admin/email-queue', (_req, res) => {
+  res.json({ success: true, ...getQueueData() });
+});
+
+app.post('/api/admin/email-queue/process', async (_req, res) => {
+  const result = await processQueue();
+  res.json({ success: true, result });
+});
+
 // OAuth2 Callback Handler for 1-Click Authorisation
 app.get('/oauth2callback', async (req, res) => {
   const code = req.query.code;
@@ -333,4 +344,5 @@ app.get('*', (_req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Jayashree Fashion Server running on http://0.0.0.0:${PORT}`);
+  startQueueWorker(60000);
 });
